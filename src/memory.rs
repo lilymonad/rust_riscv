@@ -1,3 +1,8 @@
+/// Represents the main memory.
+/// It can be implemented by any structure which can handle loads and stores.
+///
+/// Using a trait enables us to implement direct-mapped memory, RAM with MMU,
+/// or any other kind of memory interface.
 pub trait Memory {
     fn get_8(&self, addr:usize) -> u8;
     fn get_16(&self, addr:usize) -> u16;
@@ -8,6 +13,7 @@ pub trait Memory {
     fn set_32(&mut self, addr:usize, value:u32);
 }
 
+/// Simple Memory implementation for [u8] slices
 impl<'a> Memory for &'a mut [u8] {
     fn get_8(&self, addr:usize) -> u8 {
         self[addr]
@@ -40,6 +46,7 @@ impl<'a> Memory for &'a mut [u8] {
     }
 }
 
+/// Simple Memory implementation for u8 dynamic arrays (Vec<u8>)
 impl Memory for Vec<u8> {
     fn get_8(&self, addr:usize) -> u8 {
         self[addr]

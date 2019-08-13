@@ -1,8 +1,22 @@
+
+/// Base structure of an instruction in the RV32I format
+/// (just an unsigned 32bits int)
+///
+/// For more information, see the RISC-V reference in the repository
 #[derive(Debug, Copy, Clone)]
 pub struct Instruction(pub u32);
 
 impl Instruction {
 
+    /// Creates a R type RV32I instruction. These are used for operations with
+    /// only register operands (e.g. `add r1 r1 r2`).
+    ///
+    /// # Arguments
+    /// * `opcode` - The opcode
+    /// * `rd` - The destination register
+    /// * `rs1` - The first operand register
+    /// * `rs2` - The second operand register
+    /// * `funct` - A 10bits number extending the opcode
     pub fn r(opcode:u8, rd:u8, rs1:u8, rs2: u8, funct:u16) -> Instruction {
         let mut ret = Instruction(0);
 
@@ -14,6 +28,15 @@ impl Instruction {
         ret
     }
 
+    /// Creates a I type RV32I instruction. These are used for operations with
+    /// a register and an immediate (e.g. `addi r1 r1 128`).
+    ///
+    /// # Arguments
+    /// * `opcode` - The opcode
+    /// * `rd` - The destination register
+    /// * `rs1` - The register operand
+    /// * `imm` - The immediate operand on 12bits
+    /// * `funct` - The function to perform (extension of the opcode, on 3bits)
     pub fn i(opcode:u8, rd:u8, rs1:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Instruction(0);
 
@@ -25,6 +48,16 @@ impl Instruction {
         ret
     }
 
+    /// Creates a S type RV32I instruction. These are used for operations with
+    /// 2 register operands and an immediate, but no destination register
+    /// (e.g. `stw r1 r2 10`).
+    ///
+    /// # Arguments
+    /// * `opcode` - The opcode
+    /// * `rs1` - First register operand
+    /// * `rs2` - Second register operand
+    /// * `imm` - Immediate operand on 12bits representing bits [11:0]
+    /// * `funct` - A 3bits extension of the opcode
     pub fn s(opcode:u8, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Instruction(0);
 
@@ -36,6 +69,8 @@ impl Instruction {
         ret
     }
 
+    /// Creates a B type RV32I instruction. These are S type instructions with
+    /// a different immediate layout (the immediate on B represent bits [12:1])
     pub fn b(opcode:u8, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Self::s(opcode, rs1, rs2, 0, funct);
 
@@ -43,6 +78,14 @@ impl Instruction {
         ret
     }
 
+    /// Creates a U type RV32I instruction. These are used for operations with
+    /// only an immediate operand. As it carries fewer information than other
+    /// instructions, U type instructions have more space for their immediate.
+    ///
+    /// # Arguments
+    /// * `opcode` - The opcode
+    /// * `rd` - The destination register of the operation
+    /// * `imm` - bits [31:12] of the 32bits immediate value
     pub fn u(opcode:u8, rd: u8, imm:i32) -> Instruction {
         let mut ret = Instruction(0);
 
@@ -52,6 +95,8 @@ impl Instruction {
         ret
     }
 
+    /// Creates a J type RV32I instruction. These are U type instructions with
+    /// a different immediate layout (the immdiate on J represent bits [19:0])
     pub fn j(opcode:u8, rd:u8, imm:i32) -> Instruction {
         let mut ret = Self::u(opcode, rd, 0);
 
@@ -209,6 +254,7 @@ impl Instruction {
     }
 }
 
+/// Enum representing the type of instruction.
 #[derive(Debug, Copy, Clone)]
 pub enum Type {
     R,
@@ -217,6 +263,7 @@ pub enum Type {
     U,
 }
 
+/// Enum naming the different opcodes values
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum OpCode {
     LUI     = 0b0110111,

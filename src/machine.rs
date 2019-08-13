@@ -1,6 +1,7 @@
 use isa::{Instruction, OpCode};
 use memory::Memory;
 
+/// Represent the data which we need to send to the [write back] step
 struct WriteBackData {
     pub perform: bool,
     pub rd: usize,
@@ -8,16 +9,18 @@ struct WriteBackData {
 }
 
 enum WordSize {
-    B,
-    H,
-    W,
+    B = 1,
+    H = 2,
+    W = 4,
 }
 
 impl WordSize {
+    /// Helper to create a WordSize out of an u8
     fn from_u8(s:u8) -> WordSize {
         match s {
-            0 => WordSize::B,
-            1 => WordSize::H,
+            1 => WordSize::B,
+            2 => WordSize::H,
+            4 => WordSize::W,
             _ => WordSize::W,
         }
     }
@@ -28,7 +31,11 @@ enum MemAction {
     Store,
 }
 
+/// Represent the data which we need to send to the [mem] step
+/// It also contains information to forward to the next step ([write back])
 struct MemData {
+    pub pc: i32,
+
     /// data forwarding from ex stage
     pub wb_perform: bool,
     pub wb_rd: usize,
@@ -74,7 +81,7 @@ impl RV32IMachine {
             pc: 0, 
             if2dc: PipelineState::empty(),
             dc2ex: PipelineState::empty(),
-            ex2mem: MemData { wb_rd: 0, wb_perform: false, perform: None, 
+            ex2mem: MemData { pc: 0, wb_rd: 0, wb_perform: false, perform: None, 
                 addr: 0, size: WordSize::B, value: 0 },
             mem2wb: WriteBackData { perform: false, rd: 0, value: 0 },
             memory: mem,
@@ -90,12 +97,16 @@ impl RV32IMachine {
     }
 
     pub fn set_register(&mut self, i:usize, x:i32) {
+        // TODO implement exceptions when writing to r0
         if i > 0 && i < 32 {
             self.registers[i-1] = x
         }
     }
 
+    /// Executes a pipeline cycle
     pub fn cycle(&mut self) {
+        // We perform operation in reverse order to simulate a pipeline. Each
+        // step must execute something based on previously computed last step.
         self.do_write_back();
         self.do_mem();
         self.do_execute();
@@ -146,8 +157,9 @@ impl RV32IMachine {
     }
 
     fn do_execute(&mut self) {
-        let mut to_mem = MemData { wb_perform: false, wb_rd: 0, value: 0
-            , perform: None, addr: 0, size: WordSize::B };
+        let curr_pc = self.dc2ex.pc;
+        let mut to_mem = MemData { pc: curr_pc, wb_perform: false, wb_rd: 0
+            , value: 0, perform: None, addr: 0, size: WordSize::B };
         let i = self.dc2ex.instruction;
         match i.get_opcode_enum() {
             OpCode::LUI => {
@@ -156,22 +168,22 @@ impl RV32IMachine {
                 to_mem.value = i.get_imm_u();
             },
             OpCode::AUIPC => {
-                self.pc += i.get_imm_u();
+                self.pc = curr_pc + i.get_imm_u();
             },
             OpCode::JAL => {
-                to_mem.value = self.pc + 4;
+                to_mem.value = curr_pc + 4;
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
-                self.pc += i.get_imm_j();
+                self.pc += curr_pc + i.get_imm_j();
             },
             OpCode::JALR => {
-                to_mem.value = self.pc + 4;
+                to_mem.value = curr_pc + 4;
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
                 self.pc = self.get_register(i.get_rs1() as usize) + i.get_imm_i();
             },
             OpCode::BRANCH => {
-                let npc = self.pc + i.get_imm_b();
+                let npc = curr_pc + i.get_imm_b();
                 
                 let v1 = self.get_register(i.get_rs1() as usize);
                 let uv1 = v1 as u32;
