@@ -84,8 +84,6 @@ impl RV32IMachine {
     pub fn get_register(&self, i:usize) -> i32 {
         if i <= 0 || i > 31 {
             0
-        } else if i == 32 {
-            self.pc
         } else {
             self.registers[i-1]
         }
@@ -94,8 +92,6 @@ impl RV32IMachine {
     pub fn set_register(&mut self, i:usize, x:i32) {
         if i > 0 && i < 32 {
             self.registers[i-1] = x
-        } else if i == 32 {
-            self.pc = x
         }
     }
 
