@@ -14,9 +14,9 @@ enum WordSize {
     W = 4,
 }
 
-impl WordSize {
+impl From<u8> for WordSize {
     /// Helper to create a WordSize out of an u8
-    fn from_u8(s:u8) -> WordSize {
+    fn from(s:u8) -> WordSize {
         match s {
             1 => WordSize::B,
             2 => WordSize::H,
@@ -202,14 +202,14 @@ impl RV32IMachine {
                 }
             },
             OpCode::LOAD => {
-                let width = WordSize::from_u8(i.get_funct3());
+                let width = WordSize::from(i.get_funct3());
                 let base = self.get_register(i.get_rs1() as usize) as usize;
                 to_mem.perform = Some(MemAction::Load);
                 to_mem.addr = i.get_imm_i() as usize + base;
                 to_mem.size = width;
             },
             OpCode::STORE => {
-                let width = WordSize::from_u8(i.get_funct3());
+                let width = WordSize::from(i.get_funct3());
                 let base = self.get_register(i.get_rs1() as usize) as usize;
                 let src = self.get_register(i.get_rs2() as usize);
                 to_mem.perform = Some(MemAction::Store);
