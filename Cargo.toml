@@ -1,6 +1,8 @@
 [package]
-name = "riscv"
+name = "riscv-sandbox"
 version = "0.1.0"
 authors = ["Arthur Blanleuil <arthur.blanleuil@inria.fr>"]
+description = "RISC-V implementation for educational purpose."
+license = "MIT"
 
 [dependencies]

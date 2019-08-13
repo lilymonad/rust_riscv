@@ -1,4 +1,4 @@
 [[package]]
-name = "riscv"
+name = "riscv-sandbox"
 version = "0.1.0"
 
