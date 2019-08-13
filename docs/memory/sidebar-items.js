@@ -1,1 +1,0 @@
-initSidebarItems({"trait":[["Memory","Represents the main memory. It can be implemented by any structure which can handle loads and stores."]]});
