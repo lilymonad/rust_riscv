@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Instruction(pub u32);
 
 impl Instruction {
@@ -193,9 +193,23 @@ impl Instruction {
             _ => Type::U,
         }
     }
+
+    pub fn get_opcode_enum(&self) -> OpCode {
+        let codes = &[OpCode::LUI, OpCode::AUIPC, OpCode::JAL, OpCode::JALR
+        , OpCode::BRANCH, OpCode::LOAD, OpCode::STORE, OpCode::OPIMM
+        , OpCode::OPREG, OpCode::FENCE, OpCode::CSR ];
+
+        for c in codes {
+            if *c as u8 == self.get_opcode() {
+                return *c
+            }
+        }
+
+        OpCode::INVALID
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Type {
     R,
     I,
@@ -203,17 +217,18 @@ pub enum Type {
     U,
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum OpCode {
-    LUI    = 0b0110111,
-    AUIPC  = 0b0010111,
-    JAL    = 0b1101111,
-    JALR   = 0b1001111,
-    BRANCH = 0b1100011,
-    LOAD   = 0b0000011,
-    STORE  = 0b0100011,
-    REGIMM = 0b0010011,
-    REGREG = 0b0110011,
-    FENCE  = 0b0001111,
-    CSR    = 0b1110011,
+    LUI     = 0b0110111,
+    AUIPC   = 0b0010111,
+    JAL     = 0b1101111,
+    JALR    = 0b1001111,
+    BRANCH  = 0b1100011,
+    LOAD    = 0b0000011,
+    STORE   = 0b0100011,
+    OPIMM   = 0b0010011,
+    OPREG   = 0b0110011,
+    FENCE   = 0b0001111,
+    CSR     = 0b1110011,
+    INVALID = 0,
 }
