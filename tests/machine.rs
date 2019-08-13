@@ -22,17 +22,18 @@ fn registers() {
 #[test]
 fn test_add() {
     let mut memory : Vec<u8> = vec![0,0,0,0];
-    let add = Instruction::i(OpCode::OPIMM as u8, 1, 1, 1023, 0);
+    let add = Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 1023, 0);
 
     memory.set_32(0, add.0 as u32);
 
     let mut machine = machine::RV32IMachine::new(Box::new(memory));
 
-    machine.cycle();
-    machine.cycle();
-    machine.cycle();
-    machine.cycle();
-    machine.cycle();
+    // perform a whole instruction cycle
+    machine.cycle(); // fetch
+    machine.cycle(); // decode
+    machine.cycle(); // exec
+    machine.cycle(); // mem
+    machine.cycle(); // writeback
 
     assert_eq!(machine.get_register(1), 1023);
 }

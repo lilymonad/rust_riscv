@@ -4,7 +4,7 @@ use riscv::isa::{Instruction, OpCode};
 
 #[test]
 fn r_ctor() {
-    let i = Instruction::r(1, 2, 3, 4, 0b11111);
+    let i = Instruction::create_r(1, 2, 3, 4, 0b11111);
     assert_eq!(i.get_opcode(), 1);
     assert_eq!(i.get_rd(), 2);
     assert_eq!(i.get_rs1(), 3);
@@ -14,7 +14,7 @@ fn r_ctor() {
 
 #[test]
 fn i_ctor() {
-    let i = Instruction::i(1, 2, 3, 4, 5);
+    let i = Instruction::create_i(1, 2, 3, 4, 5);
     assert_eq!(i.get_opcode(), 1);
     assert_eq!(i.get_rd(), 2);
     assert_eq!(i.get_rs1(), 3);
@@ -24,7 +24,7 @@ fn i_ctor() {
 
 #[test]
 fn s_ctor() {
-    let i = Instruction::s(1, 2, 3, 0b111111, 5);
+    let i = Instruction::create_s(1, 2, 3, 0b111111, 5);
     assert_eq!(i.get_opcode(), 1);
     assert_eq!(i.get_rs1(), 2);
     assert_eq!(i.get_rs2(), 3);
@@ -34,7 +34,7 @@ fn s_ctor() {
 
 #[test]
 fn u_ctor() {
-    let i = Instruction::u(1, 2, 0xF000);
+    let i = Instruction::create_u(1, 2, 0xF000);
     assert_eq!(i.get_opcode(), 1);
     assert_eq!(i.get_rd(), 2);
     assert_eq!(i.get_imm_u(), 0xF000);
