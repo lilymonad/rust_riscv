@@ -1,0 +1,6 @@
+[package]
+name = "riscv"
+version = "0.1.0"
+authors = ["Arthur Blanleuil <arthur.blanleuil@inria.fr>"]
+
+[dependencies]
