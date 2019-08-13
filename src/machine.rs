@@ -42,7 +42,7 @@ struct MemData {
     pub size: WordSize,
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 struct PipelineState {
     pub pc: i32,
     pub instruction: Instruction,
@@ -259,10 +259,12 @@ impl RV32IMachine {
             },
             _ => {}
         }
+
+        self.ex2mem = to_mem
     }
 
     fn do_decode(&mut self) {
-        self.dc2ex = self.if2dc.clone()
+        self.dc2ex = self.if2dc
     }
 
     fn do_fetch(&mut self) {
