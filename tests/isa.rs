@@ -1,6 +1,6 @@
 extern crate riscv;
 
-use riscv::isa::{Instruction};
+use riscv::isa::{Instruction, OpCode};
 
 #[test]
 fn r_ctor() {
@@ -121,3 +121,12 @@ fn imm_j() {
     assert_eq!(i.get_imm_j(), 0xABCDE);
 }
 
+#[test]
+fn addi() {
+    let mut i = Instruction::i(OpCode::OPIMM as u8, 1, 1, 128, 0);
+    assert_eq!(i.get_rd(), 1);
+    assert_eq!(i.get_rs1(), 1);
+    assert_eq!(i.get_imm_i(), 128);
+    assert_eq!(i.get_opcode(), OpCode::OPIMM as u8);
+    assert_eq!(i.get_funct3(), 0);
+}
