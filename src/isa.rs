@@ -233,8 +233,9 @@ impl Instruction {
             0b0110011 => Type::R,
             0b0110111 => Type::U,
             0b0010111 => Type::U,
-            0b1101111 => Type::U,
+            0b1101111 => Type::J,
             0b0001111 => Type::U,
+            0b1100011 => Type::B,
             _ => Type::U,
         }
     }
@@ -260,7 +261,9 @@ pub enum Type {
     R,
     I,
     S,
+    B,
     U,
+    J,
 }
 
 /// Enum naming the different opcodes values
