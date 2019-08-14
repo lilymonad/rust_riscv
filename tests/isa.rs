@@ -123,10 +123,16 @@ fn imm_j() {
 
 #[test]
 fn addi() {
-    let mut i = Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 128, 0);
+    let i = Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 128, 0);
     assert_eq!(i.get_rd(), 1);
     assert_eq!(i.get_rs1(), 1);
     assert_eq!(i.get_imm_i(), 128);
     assert_eq!(i.get_opcode(), OpCode::OPIMM as u8);
     assert_eq!(i.get_funct3(), 0);
+}
+
+#[test]
+fn imm_i_bit_extend() {
+    let i = Instruction::create_i(0, 0, 0, 0xFFF, 0);
+    assert_eq!(i.get_imm_i(), 0xFFFFFFFF);
 }
