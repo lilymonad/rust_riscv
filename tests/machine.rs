@@ -1,8 +1,8 @@
-extern crate riscv;
+extern crate riscv_sandbox;
 
-use riscv::memory::Memory;
-use riscv::machine;
-use riscv::isa::{Instruction, OpCode};
+use riscv_sandbox::memory::Memory;
+use riscv_sandbox::machine;
+use riscv_sandbox::isa::{Instruction, OpCode};
 
 #[test]
 fn registers() {

@@ -1,13 +1,20 @@
-extern crate riscv;
+extern crate riscv_sandbox;
 
-use riscv::memory::Memory;
-use riscv::isa::{self, Instruction};
+use riscv_sandbox::memory::Memory;
+use riscv_sandbox::isa::{self, Instruction};
 
 #[test]
-fn instruction_insertion() {
+fn vec_memory_impl() {
     let i = Instruction::create_i(isa::OpCode::OPIMM as u8, 1, 1, 128, 0);
     let mut mem = vec![0, 0, 0, 0];
 
     mem.set_32(0, i.0);
-    assert_eq!(mem.get_32(0), i.0);
+    assert_eq!(mem.get_32(0), i.0)
+}
+
+#[test]
+#[should_panic]
+fn vec_memory_out_of_bound() {
+    let mut mem = vec![0, 0, 0];
+    mem.set_32(0, 128)
 }

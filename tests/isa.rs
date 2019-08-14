@@ -1,6 +1,6 @@
-extern crate riscv;
+extern crate riscv_sandbox;
 
-use riscv::isa::{Instruction, OpCode};
+use riscv_sandbox::isa::{Instruction, OpCode};
 
 #[test]
 fn r_ctor() {
@@ -123,7 +123,7 @@ fn imm_j() {
 
 #[test]
 fn addi() {
-    let mut i = Instruction::i(OpCode::OPIMM as u8, 1, 1, 128, 0);
+    let mut i = Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 128, 0);
     assert_eq!(i.get_rd(), 1);
     assert_eq!(i.get_rs1(), 1);
     assert_eq!(i.get_imm_i(), 128);
