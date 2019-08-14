@@ -281,6 +281,7 @@ impl RV32IMachine {
 
     fn do_fetch(&mut self) {
         let i = Instruction(self.memory.get_32(self.pc as usize));
-        self.if2dc = PipelineState { pc: self.pc, instruction: i }
+        self.if2dc = PipelineState { pc: self.pc, instruction: i };
+        self.pc += 4
     }
 }
