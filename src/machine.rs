@@ -88,6 +88,10 @@ impl RV32IMachine {
         }
     }
 
+    pub fn get_pc(&self) -> i32 {
+        self.pc
+    }
+
     pub fn get_register(&self, i:usize) -> i32 {
         if i <= 0 || i > 31 {
             0
@@ -176,19 +180,20 @@ impl RV32IMachine {
                 self.pc = curr_pc + i.get_imm_u();
             },
             OpCode::JAL => {
-                to_mem.value = curr_pc + 4;
+                to_mem.value = curr_pc.wrapping_add(4);
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
-                self.pc += curr_pc + i.get_imm_j();
+                self.pc = curr_pc.wrapping_add(i.get_imm_j());
             },
             OpCode::JALR => {
-                to_mem.value = curr_pc + 4;
+                to_mem.value = curr_pc.wrapping_add(4);
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
-                self.pc = self.get_register(i.get_rs1() as usize) + i.get_imm_i();
+                self.pc = self.get_register(i.get_rs1() as usize).wrapping_add(i.get_imm_i());
             },
             OpCode::BRANCH => {
-                let npc = curr_pc + i.get_imm_b();
+                let npc = curr_pc.wrapping_add(i.get_imm_b());
+                println!("BR on {}", npc);
                 
                 let v1 = self.get_register(i.get_rs1() as usize);
                 let uv1 = v1 as u32;
@@ -232,13 +237,13 @@ impl RV32IMachine {
 
                 println!("v1 = {}; v2 = {}", v1, v2);
                 to_mem.value = match i.get_funct3() {
-                    0b000 => v1 + v2,
+                    0b000 => v1.wrapping_add(v2),
                     0b010 => (v1 < v2) as i32,
                     0b011 => ((v1 as u32) < v2 as u32) as i32,
                     0b100 => v1 ^ v2,
                     0b110 => v1 | v2,
                     0b111 => v1 & v2,
-                    0b001 => { v1 << v2 },
+                    0b001 => v1 << v2,
                     0b101 => if i.get_funct7() != 0 { v1 >> v2 }
                              else { ((v1 as u32) >> v2) as i32 },
                     _ => 0, // Cannot be here, because funct3 is on 3 bits
@@ -253,7 +258,7 @@ impl RV32IMachine {
 
                 to_mem.value = match i.get_funct7() {
                     0b0000000 => match i.get_funct3() {
-                        0b000 => { v1 + v2 },
+                        0b000 => v1.wrapping_add(v2),
                         0b001 => v1 >> v2,
                         0b010 => (v1 < v2) as i32,
                         0b011 => ((v1 as u32) < v2 as u32) as i32,
@@ -267,7 +272,7 @@ impl RV32IMachine {
                         _ => 0, // TODO handle M extension (mul/div)
                     },
                     0b0100000 => match i.get_funct3() {
-                        0b000 => v1 - v2,
+                        0b000 => v1.wrapping_sub(v2),
                         0b101 => v1 >> v2,
                         _ => 0, // TODO handle bad funct3 values
                     },
@@ -286,6 +291,7 @@ impl RV32IMachine {
     }
 
     fn do_fetch(&mut self) {
+        println!("fetching at pc={}", self.pc);
         let i = Instruction(self.memory.get_32(self.pc as usize));
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
         self.pc += 4
