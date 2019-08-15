@@ -193,7 +193,6 @@ impl RV32IMachine {
             },
             OpCode::BRANCH => {
                 let npc = curr_pc.wrapping_add(i.get_imm_b());
-                println!("BR on {}", npc);
                 
                 let v1 = self.get_register(i.get_rs1() as usize);
                 let uv1 = v1 as u32;
@@ -235,7 +234,6 @@ impl RV32IMachine {
                 let v2 = if i.get_funct3() & 0b11 == 1 { i.get_rs2() as i32 }
                          else { i.get_imm_i() };
 
-                println!("v1 = {}; v2 = {}", v1, v2);
                 to_mem.value = match i.get_funct3() {
                     0b000 => v1.wrapping_add(v2),
                     0b010 => (v1 < v2) as i32,
@@ -291,7 +289,6 @@ impl RV32IMachine {
     }
 
     fn do_fetch(&mut self) {
-        println!("fetching at pc={}", self.pc);
         let i = Instruction(self.memory.get_32(self.pc as usize));
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
         self.pc += 4
