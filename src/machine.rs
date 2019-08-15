@@ -153,7 +153,12 @@ impl RV32IMachine {
             }
         }
 
-        self.mem2wb = WriteBackData { perform: perform_wb, value: value, rd: rd }
+        self.mem2wb = WriteBackData { perform: perform_wb, value: value, rd: rd };
+
+        // bypass
+        if self.ex2mem.wb_perform {
+            self.do_write_back()
+        }
     }
 
     fn do_execute(&mut self) {
@@ -225,6 +230,7 @@ impl RV32IMachine {
                 let v2 = if i.get_funct3() & 0b11 == 1 { i.get_rs2() as i32 }
                          else { i.get_imm_i() };
 
+                println!("v1 = {}; v2 = {}", v1, v2);
                 to_mem.value = match i.get_funct3() {
                     0b000 => v1 + v2,
                     0b010 => (v1 < v2) as i32,
@@ -232,7 +238,7 @@ impl RV32IMachine {
                     0b100 => v1 ^ v2,
                     0b110 => v1 | v2,
                     0b111 => v1 & v2,
-                    0b001 => v1 << v2,
+                    0b001 => { v1 << v2 },
                     0b101 => if i.get_funct7() != 0 { v1 >> v2 }
                              else { ((v1 as u32) >> v2) as i32 },
                     _ => 0, // Cannot be here, because funct3 is on 3 bits
@@ -247,7 +253,7 @@ impl RV32IMachine {
 
                 to_mem.value = match i.get_funct7() {
                     0b0000000 => match i.get_funct3() {
-                        0b000 => v1 + v2,
+                        0b000 => { v1 + v2 },
                         0b001 => v1 >> v2,
                         0b010 => (v1 < v2) as i32,
                         0b011 => ((v1 as u32) < v2 as u32) as i32,
