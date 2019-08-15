@@ -93,5 +93,43 @@ fn simple_math() {
 }
 
 #[test]
-fn simple_logic1() {
+fn fibonacci() {
+    let mut memory : Vec<u32> = Vec::new();
+    let nop = Instruction::create_i(OpCode::OPIMM as u8, 0, 0, 0, 0).0;
+    // init logic registers (r1 - r3)
+    memory.push(Instruction::create_i(OpCode::OPIMM as u8, 1, 0, 0, 0).0); // 0
+    memory.push(Instruction::create_i(OpCode::OPIMM as u8, 2, 0, 1, 0).0); // 4
+
+    // r4 = loop trip count
+    memory.push(Instruction::create_i(OpCode::OPIMM as u8, 4, 0, 0, 0).0); // 8
+    // r5 = which term we want
+    memory.push(Instruction::create_i(OpCode::OPIMM as u8, 5, 0, 5, 0).0); // 12
+
+
+    // the code
+    memory.push(Instruction::create_b(OpCode::BRANCH as u8, 4, 5, 32, 0).0); // 16
+    memory.push(nop); // 20
+    memory.push(nop); // 24
+    memory.push(Instruction::create_r(OpCode::OPREG as u8, 3, 1, 2, 0).0); // 28
+    memory.push(Instruction::create_r(OpCode::OPREG as u8, 1, 0, 2, 0).0); // 32
+    memory.push(Instruction::create_r(OpCode::OPREG as u8, 2, 0, 3, 0).0); // 36
+    memory.push(Instruction::create_i(OpCode::OPIMM as u8, 4, 4, 1, 0).0); // 40
+    memory.push(Instruction::create_j(OpCode::JAL as u8, 0, -28).0); // 44
+    memory.push(nop); // 48
+    memory.push(nop); // 52
+    memory.push(nop); // 56
+    memory.push(nop); // 60
+    memory.push(nop); // 64
+
+    let mut machine = machine::RV32IMachine::new(Box::new(memory));
+
+    while machine.get_pc() != 64 {
+        machine.cycle();
+    }
+
+    assert_eq!(machine.get_register(1), 5);
+    assert_eq!(machine.get_register(2), 8);
+    assert_eq!(machine.get_register(3), 8);
+    assert_eq!(machine.get_register(4), 5);
 }
+
