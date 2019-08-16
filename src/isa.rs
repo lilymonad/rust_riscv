@@ -1,3 +1,4 @@
+use machine::RiscvIMachine;
 
 /// Base structure of an instruction in the RV32I format
 /// (just an unsigned 32bits int)
@@ -281,4 +282,175 @@ pub enum OpCode {
     FENCE   = 0b0001111,
     CSR     = 0b1110011,
     INVALID = 0,
+}
+
+/// This type represents a CSR's (Control State Register) ID in the CSR table
+///
+/// These registers are 12-bits indexed and used by the software to either
+/// control the machine (e.g. modify privilege mode, register interruption
+/// handlers ...), or know about its state (e.g. available extensions
+/// , performances counters ...).
+///
+/// You can match any CsrId with its implemented constants. This structure helps
+/// representing a CSR ID as what it really is in hardware (12bits number) and
+/// adds some helper functions to easily get privilege the R/W permissions and
+/// privilege level of the indexed register.
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+pub struct CsrId(pub u16);
+
+impl CsrId {
+    pub const USTATUS : CsrId = CsrId(0x000);
+    pub const UIE : CsrId = CsrId(0x004);
+    pub const UTVEC : CsrId = CsrId(0x005);
+    pub const USCRATCH : CsrId = CsrId(0x040);
+    pub const UEPC : CsrId = CsrId(0x041);
+    pub const UCAUSE : CsrId = CsrId(0x042);
+    pub const UTVAL : CsrId = CsrId(0x043);
+    pub const UIP : CsrId = CsrId(0x044);
+
+    pub const FFLAGS : CsrId = CsrId(0x001);
+    pub const FRM : CsrId = CsrId(0x002);
+    pub const FCSR : CsrId = CsrId(0x003);
+
+    pub const CYCLE : CsrId = CsrId(0xC00);
+    pub const TIME : CsrId = CsrId(0xC01);
+    pub const INSTRET : CsrId = CsrId(0xC02);
+
+    pub fn hmpcounter(i:u16) -> CsrId { CsrId(0xC00 + i) }
+
+    pub const CYCLEH : CsrId = CsrId(0xC80);
+    pub const TIMEH : CsrId = CsrId(0xC81);
+    pub const INSTRETH : CsrId = CsrId(0xC82);
+
+    pub fn hmpcounter_h(i:u16) -> CsrId { CsrId(0xC80 + i) }
+
+    pub const SSTATUS : CsrId = CsrId(0x100);
+    pub const SEDELEG : CsrId = CsrId(0x102);
+    pub const SIDELEG : CsrId = CsrId(0x103);
+    pub const SIE : CsrId = CsrId(0x104);
+    pub const STVEC : CsrId = CsrId(0x105);
+    pub const SCOUNTEREN : CsrId = CsrId(0x106);
+
+    pub const SSCRATCH : CsrId = CsrId(0x140);
+    pub const SEPC : CsrId = CsrId(0x141);
+    pub const SCAUSE : CsrId = CsrId(0x142);
+    pub const STVAL : CsrId = CsrId(0x143);
+    pub const SIP : CsrId = CsrId(0x144);
+
+    pub const SATP : CsrId = CsrId(0x180);
+
+    pub const HSTATUS : CsrId = CsrId(0xA00);
+    pub const HEDELEG : CsrId = CsrId(0xA02);
+    pub const HIDELEG : CsrId = CsrId(0xA03);
+
+    pub const HGATP : CsrId = CsrId(0xA80);
+
+    pub const BSSTATUS : CsrId = CsrId(0x200);
+    pub const BSIE : CsrId = CsrId(0x204);
+    pub const BSTVEC : CsrId = CsrId(0x205);
+    pub const BSSCRATCH : CsrId = CsrId(0x240);
+    pub const BSEPC : CsrId = CsrId(0x241);
+    pub const BSCAUSE : CsrId = CsrId(0x242);
+    pub const BSTVAL : CsrId = CsrId(0x243);
+    pub const BSIP : CsrId = CsrId(0x244);
+    pub const BSATP : CsrId = CsrId(0x280);
+
+    pub const MVENDORID : CsrId = CsrId(0xF11);
+    pub const MARCHID : CsrId = CsrId(0xF12);
+    pub const MIMPID : CsrId = CsrId(0xF13);
+    pub const MHARTID : CsrId = CsrId(0xF14);
+
+    pub const MSTATUS : CsrId = CsrId(0x300);
+    pub const MISA : CsrId = CsrId(0x301);
+    pub const MEDELEG : CsrId = CsrId(0x302);
+    pub const MIDELEG : CsrId = CsrId(0x303);
+    pub const MIE : CsrId = CsrId(0x304);
+    pub const MTVEC : CsrId = CsrId(0x305);
+    pub const MCOUNTEREN : CsrId = CsrId(0x306);
+
+    pub const MSCRATCH : CsrId = CsrId(0x340);
+    pub const MEPC : CsrId = CsrId(0x341);
+    pub const MCAUSE : CsrId = CsrId(0x342);
+    pub const MTVAL : CsrId = CsrId(0x343);
+    pub const MIP : CsrId = CsrId(0x344);
+
+    pub fn pmpcfg(i:u16) -> CsrId { CsrId(0x3A0 + i) }
+    pub fn pmpaddr(i:u16) -> CsrId { CsrId(0x3B0 + i) }
+
+    pub const MCYCLE : CsrId = CsrId(0xB00);
+    pub const MINSTRET : CsrId = CsrId(0xB02);
+
+    pub fn mhmpcounter(i:u16) -> CsrId { CsrId(0xB00 + i) }
+
+    pub const MCYCLEH : CsrId = CsrId(0xB80);
+    pub const MINSTRETH : CsrId = CsrId(0xB82);
+
+    pub fn mhmpcounter_h(i:u16) -> CsrId { CsrId(0xB80 + i) }
+
+    pub const MCOUNTINHIBIT : CsrId = CsrId(0x320);
+
+    pub fn mhpevent(i:u16) -> CsrId { CsrId(0x323 + i) }
+
+    pub const TSELECT : CsrId = CsrId(0x7A0);
+    pub const TDATA1 : CsrId = CsrId(0x7A1);
+    pub const TDATA2 : CsrId = CsrId(0x7A2);
+    pub const TDATA3 : CsrId = CsrId(0x7A3);
+
+    pub const DCSR : CsrId = CsrId(0x7B0);
+    pub const DPC : CsrId = CsrId(0x7B1);
+    pub const DSCRATCH0 : CsrId = CsrId(0x7B2);
+    pub const DSCRATCH1 : CsrId = CsrId(0x7B3);
+
+    pub fn mode(&self) -> u8 {
+        (self.0 >> 10) as u8
+    }
+
+    pub fn level(&self) -> u8 {
+        ((self.0 >> 8) & 0b11) as u8
+    }
+}
+
+/// An enum representing every CSR fields (slices of CSR). It is used to access
+/// every CSR field individually in order to check their type (RW/RO/WARL/WLRL)
+pub enum CsrField {
+    // TODO define all fields
+    MODE,
+    ASID,
+    PPN,
+    MXL,
+    MXR,
+    SUM,
+    SPP,
+    SPIE,
+    SIE,
+    SCauseInterrupt,
+    SCauseCode,
+    Extensions,
+    MCauseCode,
+    MCauseInterrupt,
+}
+
+/// CSR field read/write type
+///
+/// * `RW`: Can be read and written freely
+/// * `RO`: Can be read but not written
+/// * `WARL`: (Write Any Read Legal) Can write any value to the register, even
+///           illegal ones. The register is assured to return legal values when read.
+/// * `WLRL`: (Write Legal Read Legal) Can write only legal values in the register
+///           if an illegal value is written, you can't expect legal value to be read.
+pub enum CsrFieldType {
+    RW, RO, WARL, WLRL,
+}
+
+impl CsrField {
+
+    // TODO finish the full implementation
+    pub fn get_type(&self) -> CsrFieldType {
+        match self {
+            CsrField::MXL => CsrFieldType::WARL,
+            CsrField::Extensions => CsrFieldType::WARL,
+            CsrField::PPN => CsrFieldType::WARL,
+            _ => CsrFieldType::RO,
+        }
+    }
 }

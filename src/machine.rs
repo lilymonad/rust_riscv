@@ -1,5 +1,45 @@
-use isa::{Instruction, OpCode};
+use types::MachineInteger;
+use isa::{Instruction, OpCode, CsrId, CsrField};
 use memory::Memory;
+
+pub trait RiscvIMachine {
+    type IntegerType : MachineInteger;
+
+    fn cycle(&mut self);
+    fn get_i_register(&self, id:usize) -> Self::IntegerType;
+    fn set_i_register(&mut self, id:usize, value:Self::IntegerType);
+
+    fn get_pc(&self) -> Self::IntegerType;
+    fn set_pc(&mut self, value:Self::IntegerType);
+
+    fn get_csr_field(&self, id:CsrField) -> Self::IntegerType;
+    fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType);
+
+    // TODO finish implementation
+    fn get_csr(&self, id:CsrId) -> Self::IntegerType {
+        match id {
+            CsrId::MISA =>
+                (self.get_csr_field(CsrField::MXL) << (Self::IntegerType::XLEN - 2)) |
+                 self.get_csr_field(CsrField::Extensions),
+            CsrId::MCAUSE =>
+                (self.get_csr_field(CsrField::MCauseInterrupt) << (Self::IntegerType::XLEN - 1)) |
+                 self.get_csr_field(CsrField::MCauseCode),
+            CsrId::SSTATUS => {
+                let base =
+                    (self.get_csr_field(CsrField::MXR ) << 19) |
+                    (self.get_csr_field(CsrField::SUM ) << 18) |
+                    (self.get_csr_field(CsrField::SPIE) <<  5) |
+                    (self.get_csr_field(CsrField::SIE ) <<  1);
+                if Self::IntegerType::XLEN > 32 {
+                    (self.get_csr_field(CsrField::MXL) << 32) | base
+                } else {
+                    base
+                }
+            },
+            _ => Self::IntegerType::from(0),
+        }
+    }
+}
 
 /// Represent the data which we need to send to the [write back] step
 struct WriteBackData {
@@ -73,6 +113,31 @@ pub struct RV32IMachine {
     memory: Box<Memory>,
 }
 
+impl RiscvIMachine for RV32IMachine {
+    type IntegerType = i32;
+
+    fn cycle(&mut self) {
+        self.do_write_back();
+        self.do_mem();
+        self.do_execute();
+        self.do_decode();
+        self.do_fetch();
+    }
+
+    fn get_i_register(&self, i:usize) -> i32 {
+        self.get_register(i)
+    }
+    fn set_i_register(&mut self, i:usize, value:i32) {
+        self.set_register(i, value)
+    }
+
+    fn get_csr_field(&self, _i:CsrField) -> i32 { 0 }
+    fn set_csr_field(&mut self, _i:CsrField, _value:i32) { }
+
+    fn get_pc(&self) -> i32 { self.pc }
+    fn set_pc(&mut self, value:i32) { self.pc = value }
+}
+
 impl RV32IMachine {
 
     pub fn new(mem:Box<Memory>) -> RV32IMachine {
@@ -105,6 +170,16 @@ impl RV32IMachine {
         if i > 0 && i < 32 {
             self.registers[i-1] = x
         }
+    }
+
+    pub fn get_csr_field(id:CsrId) {
+        match id {
+            CsrId::USTATUS => println!("coucou"),
+            _ => println!("caca"),
+        }
+    }
+
+    pub fn set_csr_field(id:CsrId) {
     }
 
     /// Executes a pipeline cycle

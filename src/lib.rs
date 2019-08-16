@@ -11,3 +11,6 @@ pub mod machine;
 
 /// Memory interface abstraction used to implement any memory interface you want.
 pub mod memory;
+
+/// Helper for MachineInteger traits constraints
+pub mod types;
