@@ -108,8 +108,8 @@ fn imm_u() {
     let mut i = Instruction(0);
     assert_eq!(i.get_imm_u(), 0);
 
-    i.set_imm_u(0xABCDE000);
-    assert_eq!(i.get_imm_u(), 0xABCDE000);
+    i.set_imm_u(0xABCDE000u32 as i32);
+    assert_eq!(i.get_imm_u(), 0xABCDE000u32 as i32);
 }
 
 #[test]
@@ -134,5 +134,5 @@ fn addi() {
 #[test]
 fn imm_i_bit_extend() {
     let i = Instruction::create_i(0, 0, 0, 0xFFF, 0);
-    assert_eq!(i.get_imm_i(), 0xFFFFFFFF);
+    assert_eq!(i.get_imm_i(), 0xFFFFFFFFu32 as i32);
 }

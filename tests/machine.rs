@@ -44,7 +44,7 @@ fn simple_math() {
     let mut memory : Vec<u32> = Vec::new();
 
     // load32 0x79ABCDEE r1
-    memory.push(Instruction::create_u(OpCode::LUI as u8, 1, 0x79ABC000).0);
+    memory.push(Instruction::create_u(OpCode::LUI as u8, 1, 0x79ABC000u32 as i32).0);
     memory.push(Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 0x6F7, 0).0);
     memory.push(Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 0x6F7, 0).0);
 
@@ -76,20 +76,20 @@ fn simple_math() {
     machine.cycle();
     machine.cycle();
     machine.cycle();
-    assert_eq!(machine.get_register(1), 0x79ABC000);
+    assert_eq!(machine.get_register(1), 0x79ABC000u32 as i32);
     machine.cycle(); // addi 1
     machine.cycle(); // addi 2
-    assert_eq!(machine.get_register(1), 0x79ABCDEE);
+    assert_eq!(machine.get_register(1), 0x79ABCDEEu32 as i32);
     machine.cycle(); // srli
-    assert_eq!(machine.get_register(2), 0x3CD5E6F7);
+    assert_eq!(machine.get_register(2), 0x3CD5E6F7u32 as i32);
     machine.cycle(); // slli
-    assert_eq!(machine.get_register(2), 0xF3579BDC);
+    assert_eq!(machine.get_register(2), 0xF3579BDCu32 as i32);
     machine.cycle(); // srai
-    assert_eq!(machine.get_register(2), 0xF9ABCDEE);
+    assert_eq!(machine.get_register(2), 0xF9ABCDEEu32 as i32);
     machine.cycle(); // add
-    assert_eq!(machine.get_register(2), 0x73579BDC);
+    assert_eq!(machine.get_register(2), 0x73579BDCu32 as i32);
     machine.cycle(); // sub
-    assert_eq!(machine.get_register(1), 0x06543212);
+    assert_eq!(machine.get_register(1), 0x06543212u32 as i32);
 }
 
 #[test]

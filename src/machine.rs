@@ -214,6 +214,7 @@ impl RV32IMachine {
                     WordSize::B => self.memory.get_8(self.ex2mem.addr) as i32,
                     WordSize::H => self.memory.get_16(self.ex2mem.addr) as i32,
                     WordSize::W => self.memory.get_32(self.ex2mem.addr) as i32,
+                    _ => 0,
                 };
             },
             Some(MemAction::Store) => {
@@ -223,6 +224,7 @@ impl RV32IMachine {
                     WordSize::B => self.memory.set_8(addr, val as u8),
                     WordSize::H => self.memory.set_16(addr, val as u16),
                     WordSize::W => self.memory.set_32(addr, val as u32),
+                    _ => { },
                 };
                 perform_wb = false;
                 value = 0
