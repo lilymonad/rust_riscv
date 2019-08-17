@@ -52,6 +52,7 @@ enum WordSize {
     B = 1,
     H = 2,
     W = 4,
+    D = 8,
 }
 
 impl From<u8> for WordSize {
@@ -61,7 +62,7 @@ impl From<u8> for WordSize {
             1 => WordSize::B,
             2 => WordSize::H,
             4 => WordSize::W,
-            _ => WordSize::W,
+            _ => WordSize::D,
         }
     }
 }

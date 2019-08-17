@@ -14,4 +14,3 @@ pub trait MachineInteger
 impl MachineInteger for i32 { const XLEN : u32 = 32; }
 impl MachineInteger for i64 { const XLEN : u32 = 64; }
 impl MachineInteger for i128 { const XLEN : u32 = 128; }
-
