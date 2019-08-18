@@ -15,7 +15,12 @@ pub trait RiscvIMachine {
     fn get_csr_field(&self, id:CsrField) -> Self::IntegerType;
     fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType);
 
-    // TODO finish implementation
+    /// This function is a helper function to access CSR with CSRRx instructions.
+    /// Many CSR fields are placed in the same CSR , but with different 
+    /// access privileges. The best example is `mstatus` CSR which contains many
+    /// Machine-level fields, but also Supervisor-level fields which can be
+    /// accessed with the `sstatus` CSR.
+    // TODO finish full implementation
     fn get_csr(&self, id:CsrId) -> Self::IntegerType {
         match id {
             CsrId::MISA =>
