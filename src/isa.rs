@@ -414,20 +414,31 @@ impl CsrId {
 /// every CSR field individually in order to check their type (RW/RO/WARL/WLRL)
 pub enum CsrField {
     // TODO define all fields
-    MODE,
-    ASID,
-    PPN,
-    MXL,
-    MXR,
-    SUM,
-    SPP,
-    SPIE,
-    SIE,
-    SCauseInterrupt,
-    SCauseCode,
-    Extensions,
-    MCauseCode,
-    MCauseInterrupt,
+    Bank, Offset, // mvendorid
+    ArchitectureID, // marchid
+    Implementation, // mimpid
+    HartID, // mhartid
+    MTVecBASE, MTVecMODE, // mtvec
+    STVecBASE, STVecMODE, // stvec
+    SynchronousExceptions, Interrupts, // medeleg, mideleg
+    MEIP, SEIP, UEIP, MTIP, STIP, UTIP, MSIP, SSIP, USIP, // mip
+    MEIE, SEIE, UEIE, MTIE, STIE, UTIE, MSIE, SSIE, USIE, // mie
+    MTIME, MTIMECMP, // mtime, mtimecmp
+    MCYCLE, MCYCLEH, // mcycle+h
+    MINSTRET, MINSTRETH, // minstret+h
+    MHPMEN, MIREN, MTMEN, MCYEN, // mcounteren
+    SHPMEN, SIREN, STMEN, SCYEN, // scounteren
+    MHPMIN, MIRIN, MTMIN, MCYIN, // mcountinhibit
+    MSCRATCH, SSCRATCH,
+    MEPC, SEPC,
+    MTVAL, STVAL,
+    MODE, ASID, PPN, // satp
+    MXL, Extensions, // misa
+    UXL, SXL, TSR, TW, TVM, MPRV, MPP, MPIE, MIE, // +sstatus = mstatus
+    SD, MXR, SUM, XS, FS, SPP, SPIE, SIE, // sstatus
+    UPIE, UIE, // ustatus
+    MCauseInterrupt, MCauseCode, // mcause
+    SCauseInterrupt, SCauseCode, // scause
 }
 
 /// CSR field read/write type
