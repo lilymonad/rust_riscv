@@ -242,9 +242,9 @@ impl Instruction {
     }
 
     pub fn get_opcode_enum(&self) -> OpCode {
-        let codes = &[OpCode::LUI, OpCode::AUIPC, OpCode::JAL, OpCode::JALR
+        let codes = &[ OpCode::LUI, OpCode::AUIPC, OpCode::JAL, OpCode::JALR
         , OpCode::BRANCH, OpCode::LOAD, OpCode::STORE, OpCode::OPIMM
-        , OpCode::OPREG, OpCode::FENCE, OpCode::CSR ];
+        , OpCode::OPREG, OpCode::FENCE, OpCode::SYSTEM ];
 
         for c in codes {
             if *c as u8 == self.get_opcode() {
@@ -280,7 +280,7 @@ pub enum OpCode {
     OPIMM   = 0b0010011,
     OPREG   = 0b0110011,
     FENCE   = 0b0001111,
-    CSR     = 0b1110011,
+    SYSTEM  = 0b1110011,
     INVALID = 0,
 }
 
