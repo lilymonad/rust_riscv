@@ -57,7 +57,7 @@ impl Instruction {
     /// * `opcode` - The opcode
     /// * `rs1` - First register operand
     /// * `rs2` - Second register operand
-    /// * `imm` - Immediate operand on 12bits representing bits [11:0]
+    /// * `imm` - Immediate operand on 12bits representing bits `[11:0]`
     /// * `funct` - A 3bits extension of the opcode
     pub fn create_s(opcode:u8, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Instruction(0);
@@ -71,7 +71,7 @@ impl Instruction {
     }
 
     /// Creates a B type RV32I instruction. These are S type instructions with
-    /// a different immediate layout (the immediate on B represent bits [12:1])
+    /// a different immediate layout (the immediate on B represent bits `[12:1]`)
     pub fn create_b(opcode:u8, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Self::create_s(opcode, rs1, rs2, 0, funct);
 
@@ -86,7 +86,7 @@ impl Instruction {
     /// # Arguments
     /// * `opcode` - The opcode
     /// * `rd` - The destination register of the operation
-    /// * `imm` - bits [31:12] of the 32bits immediate value
+    /// * `imm` - bits `[31:12]` of the 32bits immediate value
     pub fn create_u(opcode:u8, rd: u8, imm:i32) -> Instruction {
         let mut ret = Instruction(0);
 
@@ -97,7 +97,7 @@ impl Instruction {
     }
 
     /// Creates a J type RV32I instruction. These are U type instructions with
-    /// a different immediate layout (the immdiate on J represent bits [19:0])
+    /// a different immediate layout (the immdiate on J represent bits `[19:0]`)
     pub fn create_j(opcode:u8, rd:u8, imm:i32) -> Instruction {
         let mut ret = Self::create_u(opcode, rd, 0);
 

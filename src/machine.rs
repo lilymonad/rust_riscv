@@ -2,6 +2,8 @@ use types::MachineInteger;
 use isa::{Instruction, OpCode, CsrId, CsrField};
 use memory::Memory;
 
+/// This trait represent the minimal implementation of a RISC-V Machine.
+/// It needs to give access to integer registers and CSR registers.
 pub trait RiscvIMachine {
     type IntegerType : MachineInteger;
 
