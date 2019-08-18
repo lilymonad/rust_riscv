@@ -17,6 +17,9 @@ pub trait RiscvIMachine {
     fn get_csr_field(&self, id:CsrField) -> Self::IntegerType;
     fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType);
 
+    fn get_privilege(&self) -> u8;
+    fn set_privilege(&mut self, privilege : u8);
+
     /// This function is a helper function to access CSR with CSRRx instructions.
     /// Many CSR fields are placed in the same CSR , but with different 
     /// access privileges. The best example is `mstatus` CSR which contains many
@@ -164,6 +167,43 @@ pub trait RiscvIMachine {
             _ => Self::IntegerType::from(0),
         }
     }
+
+    fn raise_exception(&mut self, is_interrupt : bool
+                       , code : i32
+                       , info : Self::IntegerType
+                       , pc : Self::IntegerType) {
+        let medeleg = self.get_csr_field(CsrField::SynchronousExceptions);
+        let mideleg = self.get_csr_field(CsrField::Interrupts);
+        let from = Self::IntegerType::from;
+        let deleg_e = !is_interrupt && (medeleg & from(1 << code)) != from(0);
+        let deleg_i = is_interrupt && (mideleg & from(1 << code)) != from(0);
+        let old_priv = self.get_privilege();
+        if old_priv < 0b11 && (deleg_e || deleg_i) {
+            let addr = self.get_csr_field(CsrField::STVecBASE);
+            self.set_privilege(0b01);
+            self.set_csr_field(CsrField::STVAL, info);
+            self.set_csr_field(CsrField::SPP, from(old_priv as i32));
+            self.set_csr_field(CsrField::SEPC, pc);
+            self.set_csr_field(CsrField::SCauseInterrupt, from(is_interrupt as i32));
+            self.set_csr_field(CsrField::SCauseCode, from(code));
+            let sie = self.get_csr_field(CsrField::SIE);
+            self.set_csr_field(CsrField::SPIE, sie);
+            self.set_csr_field(CsrField::SIE, from(0));
+            self.set_pc(addr << 2);
+        } else {
+            let addr = self.get_csr_field(CsrField::MTVecBASE);
+            self.set_privilege(0b11);
+            self.set_csr_field(CsrField::MTVAL, info);
+            self.set_csr_field(CsrField::MPP, from(old_priv as i32));
+            let mie = self.get_csr_field(CsrField::MIE);
+            self.set_csr_field(CsrField::MPIE, mie);
+            self.set_csr_field(CsrField::MIE, from(0));
+            self.set_csr_field(CsrField::MEPC, pc);
+            self.set_csr_field(CsrField::MCauseInterrupt, from(is_interrupt as i32));
+            self.set_csr_field(CsrField::MCauseCode, from(code));
+            self.set_pc(addr << 2);
+        }
+    }
 }
 
 /// Represent the data which we need to send to the [write back] step
@@ -236,11 +276,14 @@ pub struct RV32IMachine {
     ex2mem: MemData,
     mem2wb: WriteBackData,
 
-    memory: Box<Memory>,
+    memory: Box<dyn Memory>,
 }
 
 impl RiscvIMachine for RV32IMachine {
     type IntegerType = i32;
+
+    fn set_privilege(&mut self, _p : u8) { }
+    fn get_privilege(&self) -> u8 { 0b11 }
 
     fn cycle(&mut self) {
         self.do_write_back();
@@ -253,6 +296,7 @@ impl RiscvIMachine for RV32IMachine {
     fn get_i_register(&self, i:usize) -> i32 {
         self.get_register(i)
     }
+
     fn set_i_register(&mut self, i:usize, value:i32) {
         self.set_register(i, value)
     }
@@ -266,7 +310,7 @@ impl RiscvIMachine for RV32IMachine {
 
 impl RV32IMachine {
 
-    pub fn new(mem:Box<Memory>) -> RV32IMachine {
+    pub fn new(mem:Box<dyn Memory>) -> RV32IMachine {
         RV32IMachine {
             registers : [0; 31],
             pc: 0, 
@@ -298,14 +342,11 @@ impl RV32IMachine {
         }
     }
 
-    pub fn get_csr_field(id:CsrId) {
-        match id {
-            CsrId::USTATUS => println!("coucou"),
-            _ => println!("caca"),
-        }
+    pub fn get_csr_field(&self, _id:CsrField) -> i32 {
+        0
     }
 
-    pub fn set_csr_field(id:CsrId) {
+    pub fn set_csr_field(&mut self, _id:CsrField, _value:i32) {
     }
 
     /// Executes a pipeline cycle
@@ -492,6 +533,7 @@ impl RV32IMachine {
     }
 
     fn do_fetch(&mut self) {
+        if self.pc % 4 != 0 { self.raise_exception(false, 0, 0, self.pc); }
         let i = Instruction(self.memory.get_32(self.pc as usize));
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
         self.pc += 4

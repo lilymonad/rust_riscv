@@ -1,5 +1,3 @@
-use machine::RiscvIMachine;
-
 /// Base structure of an instruction in the RV32I format
 /// (just an unsigned 32bits int)
 ///
