@@ -454,13 +454,23 @@ pub enum CsrFieldType {
 }
 
 impl CsrField {
-
-    // TODO finish the full implementation
     pub fn get_type(&self) -> CsrFieldType {
         match self {
-            CsrField::MXL => CsrFieldType::WARL,
-            CsrField::Extensions => CsrFieldType::WARL,
-            CsrField::PPN => CsrFieldType::WARL,
+            CsrField::MXL | CsrField::Extensions | CsrField::PPN |
+                CsrField::MPP | CsrField::SPP | CsrField::SXL | CsrField::UXL |
+                CsrField::FS | CsrField::MTVecBASE | CsrField::STVecBASE |
+                CsrField::MTVecMODE | CsrField::SynchronousExceptions |
+                CsrField::Interrupts | CsrField::MEIP | CsrField::SEIP |
+                CsrField::UEIP | CsrField::MTIP | CsrField::STIP | CsrField::UTIP |
+                CsrField::MSIP | CsrField::SSIP | CsrField::USIP | CsrField::MEIE |
+                CsrField::SEIE | CsrField::UEIE | CsrField::MTIE | CsrField::STIE |
+                CsrField::UTIE | CsrField::MSIE | CsrField::SSIE | CsrField::USIE |
+                CsrField::MHPMEN | CsrField::MIREN | CsrField::MTMEN | CsrField::MCYEN |
+                CsrField::MODE | CsrField::ASID | CsrField::STVecMODE | CsrField::SEPC |
+                CsrField::MEPC
+                    => CsrFieldType::WARL,
+            CsrField::MCauseCode | CsrField::SCauseCode => CsrFieldType::WLRL,
+            CsrField::XS | CsrField::SD => CsrFieldType::RO,
             _ => CsrFieldType::RO,
         }
     }
