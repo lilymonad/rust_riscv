@@ -15,7 +15,7 @@ pub trait RiscvIMachine {
     fn set_pc(&mut self, value:Self::IntegerType);
 
     fn get_csr_field(&self, id:CsrField) -> Self::IntegerType;
-    fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType);
+    fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType) -> Option<()>;
 
     fn get_privilege(&self) -> u8;
     fn set_privilege(&mut self, privilege : u8);
@@ -168,6 +168,75 @@ pub trait RiscvIMachine {
         }
     }
 
+    fn set_csr(&mut self, id:CsrId, value:Self::IntegerType) -> Option<()> {
+        let xlen = Self::IntegerType::XLEN as usize;
+        match id {
+            CsrId::MSTATUS => {
+                self.set_csr(CsrId::SSTATUS, value)?;
+                self.set_csr_field(CsrField::TSR, value.bit_slice(23, 22))?;
+                self.set_csr_field(CsrField::TW, value.bit_slice(22, 21))?;
+                self.set_csr_field(CsrField::TVM, value.bit_slice(21, 20))?;
+                self.set_csr_field(CsrField::MPRV, value.bit_slice(18, 17))?;
+                self.set_csr_field(CsrField::MPP, value.bit_slice(13, 11))?;
+                self.set_csr_field(CsrField::MPIE, value.bit_slice(8, 7))?;
+                self.set_csr_field(CsrField::MIE, value.bit_slice(4, 3))
+            },
+            CsrId::MEDELEG => self.set_csr_field(CsrField::SynchronousExceptions, value),
+            CsrId::MIDELEG => self.set_csr_field(CsrField::Interrupts, value),
+            CsrId::SIP => {
+                self.set_csr_field(CsrField::USIP, value.bit_slice(1, 0))?;
+                self.set_csr_field(CsrField::SSIP, value.bit_slice(2, 1))?;
+                self.set_csr_field(CsrField::UTIP, value.bit_slice(5, 4))?;
+                self.set_csr_field(CsrField::STIP, value.bit_slice(6, 5))?;
+                self.set_csr_field(CsrField::UEIP, value.bit_slice(9, 8))?;
+                self.set_csr_field(CsrField::SEIP, value.bit_slice(10, 9))
+            },
+            CsrId::SIE => {
+                self.set_csr_field(CsrField::USIE, value.bit_slice(1, 0))?;
+                self.set_csr_field(CsrField::SSIE, value.bit_slice(2, 1))?;
+                self.set_csr_field(CsrField::UTIE, value.bit_slice(5, 4))?;
+                self.set_csr_field(CsrField::STIE, value.bit_slice(6, 5))?;
+                self.set_csr_field(CsrField::UEIE, value.bit_slice(9, 8))?;
+                self.set_csr_field(CsrField::SEIE, value.bit_slice(10, 9))
+            },
+            CsrId::MTVEC => {
+                self.set_csr_field(CsrField::MTVecMODE, value.bit_slice(2, 0))?;
+                self.set_csr_field(CsrField::MTVecBASE, value.bit_slice(31, 2))
+            },
+            CsrId::MEPC => self.set_csr_field(CsrField::MEPC, value),
+            CsrId::SSTATUS => {
+                self.set_csr_field(CsrField::MXR, value.bit_slice(20, 19))?;
+                self.set_csr_field(CsrField::SUM, value.bit_slice(19, 18))?;
+                self.set_csr_field(CsrField::SPP, value.bit_slice(9, 8))?;
+                self.set_csr_field(CsrField::SPIE, value.bit_slice(6, 5))?;
+                self.set_csr_field(CsrField::SIE, value.bit_slice(2, 1))
+            },
+            CsrId::STVEC => {
+                self.set_csr_field(CsrField::STVecMODE, value.bit_slice(2, 0))?;
+                self.set_csr_field(CsrField::STVecBASE, value.bit_slice(31, 2))
+            },
+            CsrId::SEPC => self.set_csr_field(CsrField::SEPC, value),
+            CsrId::SCAUSE => {
+                self.set_csr_field(CsrField::SCauseCode, value.bit_slice(xlen-1, 0))?;
+                self.set_csr_field(CsrField::SCauseInterrupt, value.bit_slice(xlen, xlen-1))
+            },
+            CsrId::STVAL => self.set_csr_field(CsrField::STVAL, value),
+            CsrId::MIP => {
+                self.set_csr(CsrId::SIP, value)?;
+                self.set_csr_field(CsrField::MSIP, value.bit_slice(4, 3))?;
+                self.set_csr_field(CsrField::MTIP, value.bit_slice(8, 7))?;
+                self.set_csr_field(CsrField::MEIP, value.bit_slice(12, 11))
+            },
+            CsrId::MIE => {
+                self.set_csr(CsrId::SIE, value)?;
+                self.set_csr_field(CsrField::MSIE, value.bit_slice(4, 3))?;
+                self.set_csr_field(CsrField::MTIE, value.bit_slice(8, 7))?;
+                self.set_csr_field(CsrField::MEIE, value.bit_slice(12, 11))
+            },
+            _ => None,
+        }
+    }
+
     fn raise_exception(&mut self, is_interrupt : bool
                        , code : i32
                        , info : Self::IntegerType
@@ -302,7 +371,9 @@ impl RiscvIMachine for RV32IMachine {
     }
 
     fn get_csr_field(&self, _i:CsrField) -> i32 { 0 }
-    fn set_csr_field(&mut self, _i:CsrField, _value:i32) { }
+    fn set_csr_field(&mut self, _i:CsrField, _value:i32) -> Option<()>{
+        Some(())
+    }
 
     fn get_pc(&self) -> i32 { self.pc }
     fn set_pc(&mut self, value:i32) { self.pc = value }
@@ -323,10 +394,6 @@ impl RV32IMachine {
         }
     }
 
-    pub fn get_pc(&self) -> i32 {
-        self.pc
-    }
-
     pub fn get_register(&self, i:usize) -> i32 {
         if i <= 0 || i > 31 {
             0
@@ -340,13 +407,6 @@ impl RV32IMachine {
         if i > 0 && i < 32 {
             self.registers[i-1] = x
         }
-    }
-
-    pub fn get_csr_field(&self, _id:CsrField) -> i32 {
-        0
-    }
-
-    pub fn set_csr_field(&mut self, _id:CsrField, _value:i32) {
     }
 
     /// Executes a pipeline cycle
