@@ -27,6 +27,8 @@ pub trait RiscvIMachine {
     /// accessed with the `sstatus` CSR.
     // TODO finish full implementation (e.g. unnamed counters)
     fn get_csr(&self, id:CsrId) -> Option<Self::IntegerType> {
+        let prv = self.get_privilege();
+        if prv < id.level() { return None }
         match id {
             CsrId::MISA =>
                 Some((self.get_csr_field(CsrField::MXL) << (Self::IntegerType::XLEN - 2)) |
@@ -214,7 +216,9 @@ pub trait RiscvIMachine {
 
     // TODO finish implementation
     fn set_csr(&mut self, id:CsrId, value:Self::IntegerType) -> Option<()> {
+        let prv = self.get_privilege();
         let xlen = Self::IntegerType::XLEN as usize;
+        if prv < id.level() || id.mode() == 0b11 { return None }
         match id {
             CsrId::MSTATUS => {
                 self.set_csr(CsrId::SSTATUS, value);
@@ -536,6 +540,7 @@ impl RV32IMachine {
         let mut to_mem = MemData { pc: curr_pc, wb_perform: false, wb_rd: 0
             , value: 0, perform: None, addr: 0, size: WordSize::B };
         let i = self.dc2ex.instruction;
+        let mut illegal = false;
         match i.get_opcode_enum() {
             OpCode::LUI => {
                 to_mem.wb_perform = true;
@@ -650,26 +655,51 @@ impl RV32IMachine {
                         match i.get_funct7() {
                             0b0000000 => { // ECALL, EBREAK, URET ...
                                 match i.get_rs2() {
-                                    0b00000 => { /* TODO ECALL */ },
-                                    0b00001 => { /* TODO EBREAK */ },
-                                    0b00010 => { /* TODO URET */ },
+                                    0b00000 => { /* ECALL */
+                                        self.raise_exception(false, self.get_privilege() as i32 + 8, 0, curr_pc);
+                                        self.dc2ex = PipelineState::empty();
+                                        self.if2dc = PipelineState::empty();
+                                    },
+                                    0b00001 => { /* EBREAK */
+                                        self.raise_exception(false, 3, 0, curr_pc);
+                                        self.dc2ex = PipelineState::empty();
+                                        self.if2dc = PipelineState::empty();
+                                    },
+                                    0b00010 => { /* URET */ 
+                                        let mpie = self.get_csr_field(CsrField::UPIE);
+                                        self.set_csr_field(CsrField::UIE, mpie);
+                                        self.set_csr_field(CsrField::UPIE, 1);
+                                        self.set_pc(self.get_csr(CsrId::SEPC).unwrap());
+                                    },
                                     _ => { }
                                 }
                             },
                             0b0001000 => { // SRET
                                 match i.get_rs2() {
-                                    0b00010 => { /* TODO SRET */ },
+                                    0b00010 => { /* SRET */
+                                        let tsr = self.get_csr_field(CsrField::TSR);
+                                        let prv = self.get_privilege();
+                                        if prv < 0b01 || prv == 0b01 && tsr == 1 {
+                                            illegal = true
+                                        } else {
+                                            let mpp = self.get_csr_field(CsrField::SPP);
+                                            let mpie = self.get_csr_field(CsrField::SPIE);
+                                            self.set_csr_field(CsrField::SIE, mpie);
+                                            self.set_csr_field(CsrField::SPIE, 1);
+                                            self.set_csr_field(CsrField::SPP, 0);
+                                            self.set_privilege(mpp as u8);
+                                            self.set_pc(self.get_csr(CsrId::SEPC).unwrap());
+                                        }
+                                    },
                                     0b00101 => { /* TODO WFI */ },
                                     _ => { }
                                 }
                             },
                             0b0011000 => { // MRET
                                 match i.get_rs2() {
-                                    0b00010 => { /* TODO MRET */ 
+                                    0b00010 => {
                                         if self.get_privilege() < 0b11 {
-                                            self.raise_exception(false, 2, 0, self.pc);
-                                            self.dc2ex = PipelineState::empty();
-                                            self.if2dc = PipelineState::empty();
+                                            illegal = true
                                         } else {
                                             let mpp = self.get_csr_field(CsrField::MPP);
                                             let mpie = self.get_csr_field(CsrField::MPIE);
@@ -679,7 +709,6 @@ impl RV32IMachine {
                                             self.set_privilege(mpp as u8);
                                             self.set_pc(self.get_csr(CsrId::MEPC).unwrap());
                                         }
-
                                     },
                                     _ => { }
                                 }
@@ -687,10 +716,61 @@ impl RV32IMachine {
                             _ => {}
                         }
                     },
+                    0b001 => { /* CSRRW */
+                        let csr = CsrId(i.get_imm_i() as u16);
+                        let rs1 = i.get_rs1() as usize;
+                        let rd = i.get_rd() as usize;
+
+                        illegal = 
+                            self.get_csr(csr).and_then(| v | {
+                                to_mem.wb_rd = rd;
+                                to_mem.wb_perform = true;
+                                to_mem.value = v;
+                                
+                                self.set_csr(csr, self.get_i_register(rs1))
+                            }).is_none();
+                    },
+                    0b010 => { /* CSRRS */
+                        let csr = CsrId(i.get_imm_i() as u16);
+                        let rs1 = i.get_rs1() as usize;
+                        let rd = i.get_rd() as usize;
+
+                        illegal =
+                            self.get_csr(csr).and_then(| v | {
+                                to_mem.wb_rd = rd;
+                                to_mem.wb_perform = true;
+                                to_mem.value = v;
+
+                                self.set_csr(csr, v | self.get_i_register(rs1))
+                            }).is_none();
+                    },
+                    0b011 => { /* CSRRC */ 
+                        let csr = CsrId(i.get_imm_i() as u16);
+                        let rs1 = i.get_rs1() as usize;
+                        let rd = i.get_rd() as usize;
+
+                        illegal =
+                            self.get_csr(csr).and_then(| v | {
+                                to_mem.wb_rd = rd;
+                                to_mem.wb_perform = true;
+                                to_mem.value = v;
+
+                                self.set_csr(csr, v & !self.get_i_register(rs1))
+                            }).is_none();
+                    },
+                    0b101 => { /* TODO CSRRWI */ },
+                    0b110 => { /* TODO CSRRSI */ },
+                    0b111 => { /* TODO CSRRCI */ },
                     _ => {}
                 }
             },
             _ => {}
+        }
+
+        if illegal {
+            self.raise_exception(false, 2, 0, curr_pc);
+            self.dc2ex = PipelineState::empty();
+            self.if2dc = PipelineState::empty();
         }
 
         self.ex2mem = to_mem
