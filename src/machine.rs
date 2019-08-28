@@ -15,7 +15,7 @@ pub trait RiscvIMachine {
     fn set_pc(&mut self, value:Self::IntegerType);
 
     fn get_csr_field(&self, id:CsrField) -> Self::IntegerType;
-    fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType) -> Option<()>;
+    fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType);
 
     fn get_privilege(&self) -> u8;
     fn set_privilege(&mut self, privilege : u8);
@@ -25,19 +25,19 @@ pub trait RiscvIMachine {
     /// access privileges. The best example is `mstatus` CSR which contains many
     /// Machine-level fields, but also Supervisor-level fields which can be
     /// accessed with the `sstatus` CSR.
-    // TODO finish full implementation
-    fn get_csr(&self, id:CsrId) -> Self::IntegerType {
+    // TODO finish full implementation (e.g. unnamed counters)
+    fn get_csr(&self, id:CsrId) -> Option<Self::IntegerType> {
         match id {
             CsrId::MISA =>
-                (self.get_csr_field(CsrField::MXL) << (Self::IntegerType::XLEN - 2)) |
-                 self.get_csr_field(CsrField::Extensions),
-            CsrId::MARCHID => self.get_csr_field(CsrField::ArchitectureID),
+                Some((self.get_csr_field(CsrField::MXL) << (Self::IntegerType::XLEN - 2)) |
+                 self.get_csr_field(CsrField::Extensions)),
+            CsrId::MARCHID => Some(self.get_csr_field(CsrField::ArchitectureID)),
             CsrId::MVENDORID => {
-                (self.get_csr_field(CsrField::Bank) << 7) |
-                 self.get_csr_field(CsrField::Offset)
+                Some((self.get_csr_field(CsrField::Bank) << 7) |
+                 self.get_csr_field(CsrField::Offset))
             },
-            CsrId::MIMPID => self.get_csr_field(CsrField::Implementation),
-            CsrId::MHARTID => self.get_csr_field(CsrField::HartID),
+            CsrId::MIMPID => Some(self.get_csr_field(CsrField::Implementation)),
+            CsrId::MHARTID => Some(self.get_csr_field(CsrField::HartID)),
             CsrId::MSTATUS => {
                 let base =
                     (self.get_csr_field(CsrField::TSR) << 22) |
@@ -47,65 +47,105 @@ pub trait RiscvIMachine {
                     (self.get_csr_field(CsrField::MPP) << 11) |
                     (self.get_csr_field(CsrField::MPIE) << 7) |
                     (self.get_csr_field(CsrField::MIE) << 3) |
-                    self.get_csr(CsrId::SSTATUS);
-                if Self::IntegerType::XLEN > 32 {
+                    self.get_csr(CsrId::SSTATUS).unwrap();
+                Some(if Self::IntegerType::XLEN > 32 {
                     (self.get_csr_field(CsrField::SXL) << 34) |
                     (self.get_csr_field(CsrField::UXL) << 32) |
                     base
                 } else {
                     base
-                }
+                })
             },
             CsrId::MTVEC => {
-                (self.get_csr_field(CsrField::MTVecBASE) << 2) |
-                self.get_csr_field(CsrField::MTVecMODE)
+                Some((self.get_csr_field(CsrField::MTVecBASE) << 2) |
+                self.get_csr_field(CsrField::MTVecMODE))
             },
-            CsrId::MEDELEG => self.get_csr_field(CsrField::SynchronousExceptions),
-            CsrId::MIDELEG => self.get_csr_field(CsrField::Interrupts),
+            CsrId::MEDELEG => Some(self.get_csr_field(CsrField::SynchronousExceptions)),
+            CsrId::MIDELEG => Some(self.get_csr_field(CsrField::Interrupts)),
             CsrId::MIP => {
-                (self.get_csr_field(CsrField::MEIP) << 11) |
+                Some((self.get_csr_field(CsrField::MEIP) << 11) |
                 (self.get_csr_field(CsrField::MTIP) << 7) |
                 (self.get_csr_field(CsrField::MSIP) << 3) |
-                 self.get_csr(CsrId::SIP)
+                 self.get_csr(CsrId::SIP).unwrap())
             },
             CsrId::MIE => {
-                (self.get_csr_field(CsrField::MEIE) << 11) |
+                Some((self.get_csr_field(CsrField::MEIE) << 11) |
                 (self.get_csr_field(CsrField::MTIE) << 7) |
                 (self.get_csr_field(CsrField::MSIE) << 3) |
-                 self.get_csr(CsrId::SIE)
+                 self.get_csr(CsrId::SIE).unwrap())
             },
-            CsrId::MCYCLE => self.get_csr_field(CsrField::MCYCLE),
+            CsrId::MCYCLE => { 
+                let prv = self.get_privilege();
+                let permS = self.get_csr_field(CsrField::MCYEN);
+                let permU = self.get_csr_field(CsrField::SCYEN);
+                let one = Self::IntegerType::from(1);
+                if prv == 0b11
+                    || prv == 0b01 && permS == one
+                    || prv == 0b00 && permS == one && permU == one {
+                    Some(self.get_csr_field(CsrField::MCYCLE))
+                } else {
+                    None
+                }
+            },
             CsrId::MCYCLEH => {
+                let prv = self.get_privilege();
+                let permS = self.get_csr_field(CsrField::MCYEN);
+                let permU = self.get_csr_field(CsrField::SCYEN);
+                let one = Self::IntegerType::from(1);
+                if prv == 0b11
+                    || prv == 0b01 && permS == one
+                    || prv == 0b00 && permS == one && permU == one {
+                        Some(
                 if Self::IntegerType::XLEN == 32 {
                     self.get_csr_field(CsrField::MCYCLEH) >> 32
-                } else { Self::IntegerType::from(0) }
+                } else { Self::IntegerType::from(0) })
+                } else { None }
             },
-            CsrId::MINSTRET => self.get_csr_field(CsrField::MINSTRET),
+            CsrId::MINSTRET => {
+                let prv = self.get_privilege();
+                let permS = self.get_csr_field(CsrField::MCYEN);
+                let permU = self.get_csr_field(CsrField::SCYEN);
+                let one = Self::IntegerType::from(1);
+                if prv == 0b11
+                    || prv == 0b01 && permS == one
+                    || prv == 0b00 && permS == one && permU == one {
+                Some(self.get_csr_field(CsrField::MINSTRET))
+                } else { None }
+            },
             CsrId::MINSTRETH => {
-                if Self::IntegerType::XLEN == 32 {
-                    self.get_csr_field(CsrField::MINSTRETH) >> 32
-                } else { Self::IntegerType::from(0) }
+                let prv = self.get_privilege();
+                let permS = self.get_csr_field(CsrField::MCYEN);
+                let permU = self.get_csr_field(CsrField::SCYEN);
+                let one = Self::IntegerType::from(1);
+                if prv == 0b11
+                    || prv == 0b01 && permS == one
+                    || prv == 0b00 && permS == one && permU == one {
+                    Some(
+                    if Self::IntegerType::XLEN == 32 {
+                        self.get_csr_field(CsrField::MINSTRETH) >> 32
+                    } else { Self::IntegerType::from(0) })
+                } else { None }
             },
             CsrId::MCOUNTEREN => {
-                (self.get_csr_field(CsrField::MHPMEN) << 3) |
+                Some((self.get_csr_field(CsrField::MHPMEN) << 3) |
                 (self.get_csr_field(CsrField::MIREN) << 2) |
                 (self.get_csr_field(CsrField::MTMEN) << 1) |
-                 self.get_csr_field(CsrField::MCYEN)
+                 self.get_csr_field(CsrField::MCYEN))
             },
             CsrId::MCOUNTINHIBIT => {
-                (self.get_csr_field(CsrField::MHPMIN) << 3) |
+                Some((self.get_csr_field(CsrField::MHPMIN) << 3) |
                 (self.get_csr_field(CsrField::MIRIN) << 2) |
                 (self.get_csr_field(CsrField::MTMIN) << 1) |
-                 self.get_csr_field(CsrField::MCYIN)
+                 self.get_csr_field(CsrField::MCYIN))
             },
-            CsrId::MSCRATCH => self.get_csr_field(CsrField::MSCRATCH),
-            CsrId::MEPC => self.get_csr_field(CsrField::MEPC),
+            CsrId::MSCRATCH => Some(self.get_csr_field(CsrField::MSCRATCH)),
+            CsrId::MEPC => Some(self.get_csr_field(CsrField::MEPC)),
             CsrId::MCAUSE => {
-                (self.get_csr_field(CsrField::MCauseInterrupt)
+                Some((self.get_csr_field(CsrField::MCauseInterrupt)
                     << (Self::IntegerType::XLEN - 1)) |
-                 self.get_csr_field(CsrField::MCauseCode)
+                 self.get_csr_field(CsrField::MCauseCode))
             },
-            CsrId::MTVAL => self.get_csr_field(CsrField::MTVAL),
+            CsrId::MTVAL => Some(self.get_csr_field(CsrField::MTVAL)),
             CsrId::SSTATUS => {
                 let base =
                     (self.get_csr_field(CsrField::SD) <<
@@ -119,121 +159,122 @@ pub trait RiscvIMachine {
                     (self.get_csr_field(CsrField::UPIE) << 4) |
                     (self.get_csr_field(CsrField::SIE) << 1) |
                     (self.get_csr_field(CsrField::UIE ) << 0);
-                if Self::IntegerType::XLEN > 32 {
+                Some(if Self::IntegerType::XLEN > 32 {
                     (self.get_csr_field(CsrField::UXL) << 32) | base
                 } else {
                     base
-                }
+                })
             },
             CsrId::STVEC => {
-                (self.get_csr_field(CsrField::STVecBASE) << 2) |
-                self.get_csr_field(CsrField::STVecMODE)
+                Some((self.get_csr_field(CsrField::STVecBASE) << 2) |
+                self.get_csr_field(CsrField::STVecMODE))
             },
             CsrId::SIP => {
-                (self.get_csr_field(CsrField::SEIP) << 9) |
+                Some((self.get_csr_field(CsrField::SEIP) << 9) |
                 (self.get_csr_field(CsrField::UEIP) << 8) |
                 (self.get_csr_field(CsrField::STIP) << 5) |
                 (self.get_csr_field(CsrField::UTIP) << 4) |
                 (self.get_csr_field(CsrField::SSIP) << 1) |
-                 self.get_csr_field(CsrField::USIP)
+                 self.get_csr_field(CsrField::USIP))
             },
             CsrId::SIE => {
-                (self.get_csr_field(CsrField::SEIE) << 9) |
+                Some((self.get_csr_field(CsrField::SEIE) << 9) |
                 (self.get_csr_field(CsrField::UEIE) << 8) |
                 (self.get_csr_field(CsrField::STIE) << 5) |
                 (self.get_csr_field(CsrField::UTIE) << 4) |
                 (self.get_csr_field(CsrField::SSIE) << 1) |
-                 self.get_csr_field(CsrField::USIE)
+                 self.get_csr_field(CsrField::USIE))
             },
             CsrId::SCOUNTEREN => {
-                (self.get_csr_field(CsrField::SHPMEN) << 3) |
+                Some((self.get_csr_field(CsrField::SHPMEN) << 3) |
                 (self.get_csr_field(CsrField::SIREN) << 2) |
                 (self.get_csr_field(CsrField::STMEN) << 1) |
-                 self.get_csr_field(CsrField::SCYEN)
+                 self.get_csr_field(CsrField::SCYEN))
             },
-            CsrId::SSCRATCH => self.get_csr_field(CsrField::SSCRATCH),
-            CsrId::SEPC => self.get_csr_field(CsrField::SEPC),
+            CsrId::SSCRATCH => Some(self.get_csr_field(CsrField::SSCRATCH)),
+            CsrId::SEPC => Some(self.get_csr_field(CsrField::SEPC)),
             CsrId::SCAUSE => {
-                (self.get_csr_field(CsrField::SCauseInterrupt)
+                Some((self.get_csr_field(CsrField::SCauseInterrupt)
                     << (Self::IntegerType::XLEN - 1)) |
-                 self.get_csr_field(CsrField::SCauseCode)
+                 self.get_csr_field(CsrField::SCauseCode))
             },
-            CsrId::STVAL => self.get_csr_field(CsrField::STVAL),
+            CsrId::STVAL => Some(self.get_csr_field(CsrField::STVAL)),
             CsrId::SATP => {
-                (self.get_csr_field(CsrField::MODE) << 31) |
+                Some((self.get_csr_field(CsrField::MODE) << 31) |
                 (self.get_csr_field(CsrField::ASID) << 22) |
-                 self.get_csr_field(CsrField::PPN)
+                 self.get_csr_field(CsrField::PPN))
             },
-            _ => Self::IntegerType::from(0),
+            _ => Some(Self::IntegerType::from(0)),
         }
     }
 
-    fn set_csr(&mut self, id:CsrId, value:Self::IntegerType) -> Option<()> {
+    // TODO finish implementation
+    fn set_csr(&mut self, id:CsrId, value:Self::IntegerType) {
         let xlen = Self::IntegerType::XLEN as usize;
         match id {
             CsrId::MSTATUS => {
-                self.set_csr(CsrId::SSTATUS, value)?;
-                self.set_csr_field(CsrField::TSR, value.bit_slice(23, 22))?;
-                self.set_csr_field(CsrField::TW, value.bit_slice(22, 21))?;
-                self.set_csr_field(CsrField::TVM, value.bit_slice(21, 20))?;
-                self.set_csr_field(CsrField::MPRV, value.bit_slice(18, 17))?;
-                self.set_csr_field(CsrField::MPP, value.bit_slice(13, 11))?;
-                self.set_csr_field(CsrField::MPIE, value.bit_slice(8, 7))?;
+                self.set_csr(CsrId::SSTATUS, value);
+                self.set_csr_field(CsrField::TSR, value.bit_slice(23, 22));
+                self.set_csr_field(CsrField::TW, value.bit_slice(22, 21));
+                self.set_csr_field(CsrField::TVM, value.bit_slice(21, 20));
+                self.set_csr_field(CsrField::MPRV, value.bit_slice(18, 17));
+                self.set_csr_field(CsrField::MPP, value.bit_slice(13, 11));
+                self.set_csr_field(CsrField::MPIE, value.bit_slice(8, 7));
                 self.set_csr_field(CsrField::MIE, value.bit_slice(4, 3))
             },
             CsrId::MEDELEG => self.set_csr_field(CsrField::SynchronousExceptions, value),
             CsrId::MIDELEG => self.set_csr_field(CsrField::Interrupts, value),
             CsrId::SIP => {
-                self.set_csr_field(CsrField::USIP, value.bit_slice(1, 0))?;
-                self.set_csr_field(CsrField::SSIP, value.bit_slice(2, 1))?;
-                self.set_csr_field(CsrField::UTIP, value.bit_slice(5, 4))?;
-                self.set_csr_field(CsrField::STIP, value.bit_slice(6, 5))?;
-                self.set_csr_field(CsrField::UEIP, value.bit_slice(9, 8))?;
+                self.set_csr_field(CsrField::USIP, value.bit_slice(1, 0));
+                self.set_csr_field(CsrField::SSIP, value.bit_slice(2, 1));
+                self.set_csr_field(CsrField::UTIP, value.bit_slice(5, 4));
+                self.set_csr_field(CsrField::STIP, value.bit_slice(6, 5));
+                self.set_csr_field(CsrField::UEIP, value.bit_slice(9, 8));
                 self.set_csr_field(CsrField::SEIP, value.bit_slice(10, 9))
             },
             CsrId::SIE => {
-                self.set_csr_field(CsrField::USIE, value.bit_slice(1, 0))?;
-                self.set_csr_field(CsrField::SSIE, value.bit_slice(2, 1))?;
-                self.set_csr_field(CsrField::UTIE, value.bit_slice(5, 4))?;
-                self.set_csr_field(CsrField::STIE, value.bit_slice(6, 5))?;
-                self.set_csr_field(CsrField::UEIE, value.bit_slice(9, 8))?;
+                self.set_csr_field(CsrField::USIE, value.bit_slice(1, 0));
+                self.set_csr_field(CsrField::SSIE, value.bit_slice(2, 1));
+                self.set_csr_field(CsrField::UTIE, value.bit_slice(5, 4));
+                self.set_csr_field(CsrField::STIE, value.bit_slice(6, 5));
+                self.set_csr_field(CsrField::UEIE, value.bit_slice(9, 8));
                 self.set_csr_field(CsrField::SEIE, value.bit_slice(10, 9))
             },
             CsrId::MTVEC => {
-                self.set_csr_field(CsrField::MTVecMODE, value.bit_slice(2, 0))?;
+                self.set_csr_field(CsrField::MTVecMODE, value.bit_slice(2, 0));
                 self.set_csr_field(CsrField::MTVecBASE, value.bit_slice(31, 2))
             },
             CsrId::MEPC => self.set_csr_field(CsrField::MEPC, value),
             CsrId::SSTATUS => {
-                self.set_csr_field(CsrField::MXR, value.bit_slice(20, 19))?;
-                self.set_csr_field(CsrField::SUM, value.bit_slice(19, 18))?;
-                self.set_csr_field(CsrField::SPP, value.bit_slice(9, 8))?;
-                self.set_csr_field(CsrField::SPIE, value.bit_slice(6, 5))?;
+                self.set_csr_field(CsrField::MXR, value.bit_slice(20, 19));
+                self.set_csr_field(CsrField::SUM, value.bit_slice(19, 18));
+                self.set_csr_field(CsrField::SPP, value.bit_slice(9, 8));
+                self.set_csr_field(CsrField::SPIE, value.bit_slice(6, 5));
                 self.set_csr_field(CsrField::SIE, value.bit_slice(2, 1))
             },
             CsrId::STVEC => {
-                self.set_csr_field(CsrField::STVecMODE, value.bit_slice(2, 0))?;
+                self.set_csr_field(CsrField::STVecMODE, value.bit_slice(2, 0));
                 self.set_csr_field(CsrField::STVecBASE, value.bit_slice(31, 2))
             },
             CsrId::SEPC => self.set_csr_field(CsrField::SEPC, value),
             CsrId::SCAUSE => {
-                self.set_csr_field(CsrField::SCauseCode, value.bit_slice(xlen-1, 0))?;
+                self.set_csr_field(CsrField::SCauseCode, value.bit_slice(xlen-1, 0));
                 self.set_csr_field(CsrField::SCauseInterrupt, value.bit_slice(xlen, xlen-1))
             },
             CsrId::STVAL => self.set_csr_field(CsrField::STVAL, value),
             CsrId::MIP => {
-                self.set_csr(CsrId::SIP, value)?;
-                self.set_csr_field(CsrField::MSIP, value.bit_slice(4, 3))?;
-                self.set_csr_field(CsrField::MTIP, value.bit_slice(8, 7))?;
+                self.set_csr(CsrId::SIP, value);
+                self.set_csr_field(CsrField::MSIP, value.bit_slice(4, 3));
+                self.set_csr_field(CsrField::MTIP, value.bit_slice(8, 7));
                 self.set_csr_field(CsrField::MEIP, value.bit_slice(12, 11))
             },
             CsrId::MIE => {
-                self.set_csr(CsrId::SIE, value)?;
-                self.set_csr_field(CsrField::MSIE, value.bit_slice(4, 3))?;
-                self.set_csr_field(CsrField::MTIE, value.bit_slice(8, 7))?;
+                self.set_csr(CsrId::SIE, value);
+                self.set_csr_field(CsrField::MSIE, value.bit_slice(4, 3));
+                self.set_csr_field(CsrField::MTIE, value.bit_slice(8, 7));
                 self.set_csr_field(CsrField::MEIE, value.bit_slice(12, 11))
             },
-            _ => None,
+            _ => { },
         }
     }
 
@@ -371,8 +412,7 @@ impl RiscvIMachine for RV32IMachine {
     }
 
     fn get_csr_field(&self, _i:CsrField) -> i32 { 0 }
-    fn set_csr_field(&mut self, _i:CsrField, _value:i32) -> Option<()>{
-        Some(())
+    fn set_csr_field(&mut self, _i:CsrField, _value:i32) {
     }
 
     fn get_pc(&self) -> i32 { self.pc }
@@ -581,6 +621,52 @@ impl RV32IMachine {
                     _ => 0, // TODO add other extensions (F has priority)
                 };
 
+            },
+            OpCode::SYSTEM => {
+                match i.get_funct3() {
+                    0b000 => {
+                        match i.get_funct7() {
+                            0b0000000 => { // ECALL, EBREAK, URET ...
+                                match i.get_rs2() {
+                                    0b00000 => { /* TODO ECALL */ },
+                                    0b00001 => { /* TODO EBREAK */ },
+                                    0b00010 => { /* TODO URET */ },
+                                    _ => { }
+                                }
+                            },
+                            0b0001000 => { // SRET
+                                match i.get_rs2() {
+                                    0b00010 => { /* TODO SRET */ },
+                                    0b00101 => { /* TODO WFI */ },
+                                    _ => { }
+                                }
+                            },
+                            0b0011000 => { // MRET
+                                match i.get_rs2() {
+                                    0b00010 => { /* TODO MRET */ 
+                                        if self.get_privilege() < 0b11 {
+                                            self.raise_exception(false, 2, 0, self.pc);
+                                            self.dc2ex = PipelineState::empty();
+                                            self.if2dc = PipelineState::empty();
+                                        } else {
+                                            let mpp = self.get_csr_field(CsrField::MPP);
+                                            let mpie = self.get_csr_field(CsrField::MPIE);
+                                            self.set_csr_field(CsrField::MIE, mpie);
+                                            self.set_csr_field(CsrField::MPIE, 1);
+                                            self.set_csr_field(CsrField::MPP, 0);
+                                            self.set_privilege(mpp as u8);
+                                            self.set_pc(self.get_csr(CsrId::MEPC));
+                                        }
+
+                                    },
+                                    _ => { }
+                                }
+                            },
+                            _ => {}
+                        }
+                    },
+                    _ => {}
+                }
             },
             _ => {}
         }
