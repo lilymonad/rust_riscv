@@ -758,9 +758,48 @@ impl RV32IMachine {
                                 self.set_csr(csr, v & !self.get_i_register(rs1))
                             }).is_none();
                     },
-                    0b101 => { /* TODO CSRRWI */ },
-                    0b110 => { /* TODO CSRRSI */ },
-                    0b111 => { /* TODO CSRRCI */ },
+                    0b101 => { /* CSRRWI */
+                        let csr = CsrId(i.get_imm_i() as u16);
+                        let rs1 = i.get_rs1() as usize;
+                        let rd = i.get_rd() as usize;
+
+                        illegal = 
+                            self.get_csr(csr).and_then(| v | {
+                                to_mem.wb_rd = rd;
+                                to_mem.wb_perform = true;
+                                to_mem.value = v;
+                                
+                                self.set_csr(csr, rs1 as i32)
+                            }).is_none();
+                    },
+                    0b110 => { /* CSRRSI */
+                        let csr = CsrId(i.get_imm_i() as u16);
+                        let rs1 = i.get_rs1() as usize;
+                        let rd = i.get_rd() as usize;
+
+                        illegal = 
+                            self.get_csr(csr).and_then(| v | {
+                                to_mem.wb_rd = rd;
+                                to_mem.wb_perform = true;
+                                to_mem.value = v;
+                                
+                                self.set_csr(csr, v | (rs1 as i32))
+                            }).is_none();
+                    },
+                    0b111 => { /* CSRRCI */
+                        let csr = CsrId(i.get_imm_i() as u16);
+                        let rs1 = i.get_rs1() as usize;
+                        let rd = i.get_rd() as usize;
+
+                        illegal = 
+                            self.get_csr(csr).and_then(| v | {
+                                to_mem.wb_rd = rd;
+                                to_mem.wb_perform = true;
+                                to_mem.value = v;
+                                
+                                self.set_csr(csr, v | !(rs1 as i32))
+                            }).is_none();
+                    },
                     _ => {}
                 }
             },
