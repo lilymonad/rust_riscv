@@ -7,17 +7,39 @@ use memory::Memory;
 pub trait RiscvIMachine {
     type IntegerType : MachineInteger;
 
+    /// A single clock cycle
     fn cycle(&mut self);
+
     fn get_i_register(&self, id:usize) -> Self::IntegerType;
     fn set_i_register(&mut self, id:usize, value:Self::IntegerType);
 
+    /// As this function is the `get` counterpart of `set_pc()`, it needs to return
+    /// the right PC (in pipelined simulators there are multiple "PCs").
+    /// This function returns the PC of the instruction we are fetching.
     fn get_pc(&self) -> Self::IntegerType;
+
+    /// This function is crucial as it is used in helpers such as `raise_exception()`.
+    /// It is used to set the PC of the fetched instruction. When calling `cycle()`
+    /// the PC set by this function will be used to get the next instruction to be
+    /// executed.
     fn set_pc(&mut self, value:Self::IntegerType);
 
+    /// Gets a CSR Field's value. As CSR Fields are bit slices never wider than
+    /// `XLEN`, we return an `XLEN`-wide number with `bitN` of the `XLEN` number
+    /// corresponding to `bitN` of the CSR Field.
     fn get_csr_field(&self, id:CsrField) -> Self::IntegerType;
+
+    /// Sets a CSR Field's value. As CSR Fields are bit slices never wider than
+    /// `XLEN`, the parameter is a `XLEN`-wide number with `bitN` of the parameter
+    /// corresponding to `bitN` of the CSR Field.
     fn set_csr_field(&mut self, id:CsrField, value:Self::IntegerType);
 
+    /// Gets privilege level of the processor. `0b00, 0b01, 0b11` correspond
+    /// respectively to `Machine`, `Supervisor`, and `User` privilege.
     fn get_privilege(&self) -> u8;
+
+    /// Sets privilege level of the processor. `0b00, 0b01, 0b11` correspond
+    /// respectively to `Machine`, `Supervisor`, and `User` privilege.
     fn set_privilege(&mut self, privilege : u8);
 
     /// This function is a helper function to access CSR with CSRRx instructions.
@@ -27,8 +49,11 @@ pub trait RiscvIMachine {
     /// accessed with the `sstatus` CSR.
     // TODO finish full implementation (e.g. unnamed counters)
     fn get_csr(&self, id:CsrId) -> Option<Self::IntegerType> {
+
+        // prevent lower privilege accesses
         let prv = self.get_privilege();
         if prv < id.level() { return None }
+
         match id {
             CsrId::MISA =>
                 Some((self.get_csr_field(CsrField::MXL) << (Self::IntegerType::XLEN - 2)) |
@@ -214,6 +239,11 @@ pub trait RiscvIMachine {
         }
     }
 
+
+    /// Setter for CSR registers. This function has a default definition using
+    /// `set_csr_field()`. By default, we test for privilege level, access mode
+    /// (WARL/WLRL/RO/RW), and we take care or setting bit fields at the right
+    /// offset in the register.
     // TODO finish implementation
     fn set_csr(&mut self, id:CsrId, value:Self::IntegerType) -> Option<()> {
         let prv = self.get_privilege();
@@ -304,6 +334,11 @@ pub trait RiscvIMachine {
         }
     }
 
+    /// This function is the default implementation of the way an exception
+    /// is raised in RISC-V. It only needs to have some CSR Fields implemented
+    /// and a way to set the privilege level and the PC of the processor.
+    /// This function is used whenever the processor implementation needs to
+    /// raise an exception (e.g. missaligned or illegal instruction)
     fn raise_exception(&mut self, is_interrupt : bool
                        , code : i32
                        , info : Self::IntegerType
