@@ -103,6 +103,19 @@ impl Instruction {
         ret
     }
 
+    pub fn lui(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::LUI as u8, rd, imm) }
+    pub fn auipc(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::AUIPC as u8, rd, imm) }
+    pub fn jal(rd:u8, imm:i32) -> Instruction { Self::create_j(OpCode::JAL as u8, rd, imm) }
+    pub fn jalr(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::JALR as u8, rd, rs1, imm, 0) }
+    pub fn beq(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 0) }
+    pub fn bne(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 1) }
+    pub fn blt(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 4) }
+    pub fn bge(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 5) }
+    pub fn bltu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 6) }
+    pub fn bgeu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 7) }
+    pub fn add(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 0) }
+    pub fn addi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 0) }
+
     pub fn get_opcode(&self) -> u8 {
         (self.0 & 0x7F) as u8
     }
@@ -411,7 +424,6 @@ impl CsrId {
 /// An enum representing every CSR fields (slices of CSR). It is used to access
 /// every CSR field individually in order to check their type (RW/RO/WARL/WLRL)
 pub enum CsrField {
-    // TODO define all fields
     Bank, Offset, // mvendorid
     ArchitectureID, // marchid
     Implementation, // mimpid
@@ -469,7 +481,7 @@ impl CsrField {
                     => CsrFieldType::WARL,
             CsrField::MCauseCode | CsrField::SCauseCode => CsrFieldType::WLRL,
             CsrField::XS | CsrField::SD => CsrFieldType::RO,
-            _ => CsrFieldType::RO,
+            _ => CsrFieldType::RW,
         }
     }
 }
