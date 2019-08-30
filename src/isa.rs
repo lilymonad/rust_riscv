@@ -1,3 +1,5 @@
+use types::MachineInteger;
+
 /// Base structure of an instruction in the RV32I format
 /// (just an unsigned 32bits int)
 ///
@@ -482,6 +484,119 @@ impl CsrField {
             CsrField::MCauseCode | CsrField::SCauseCode => CsrFieldType::WLRL,
             CsrField::XS | CsrField::SD => CsrFieldType::RO,
             _ => CsrFieldType::RW,
+        }
+    }
+
+    pub fn get_csr_id(&self) -> CsrId {
+        match self {
+            CsrField::Bank | CsrField::Offset => CsrId::MVENDORID,
+            CsrField::ArchitectureID => CsrId::MARCHID,
+            CsrField::Implementation => CsrId::MIMPID,
+            CsrField::HartID => CsrId::MHARTID,
+            CsrField::MTVecBASE | CsrField::MTVecMODE => CsrId::MTVEC,
+            CsrField::STVecBASE | CsrField::STVecMODE => CsrId::STVEC,
+            CsrField::SynchronousExceptions => CsrId::MEDELEG,
+            CsrField::Interrupts => CsrId::MIDELEG,
+            CsrField::MEIP | CsrField::SEIP | CsrField::UEIP | CsrField::MTIP |
+                CsrField::STIP | CsrField::UTIP | CsrField::MSIP | CsrField::SSIP |
+                CsrField::USIP => CsrId::MIP,
+            CsrField::MEIE | CsrField::SEIE | CsrField::UEIE | CsrField::MTIE | CsrField::STIE | CsrField::UTIE | CsrField::MSIE | CsrField::SSIE |
+                CsrField::USIE => CsrId::MIE,
+            CsrField::MTIME => CsrId::TIME,
+            CsrField::MTIMECMP => CsrId::TIME /* CsrId::TIMECMP */,
+            CsrField::MINSTRET => CsrId::MINSTRET,
+            CsrField::MINSTRETH => CsrId::MINSTRETH,
+            CsrField::MCYCLE => CsrId::MCYCLE,
+            CsrField::MCYCLEH => CsrId::MCYCLEH,
+            CsrField::MHPMEN | CsrField::MIREN | CsrField::MTMEN | CsrField::MCYEN => CsrId::MCOUNTEREN,
+            CsrField::MHPMIN | CsrField::MIRIN | CsrField::MTMIN | CsrField::MCYIN => CsrId::MCOUNTINHIBIT,
+            CsrField::SHPMEN | CsrField::SIREN | CsrField::STMEN | CsrField::SCYEN => CsrId::SCOUNTEREN,
+            CsrField::MSCRATCH => CsrId::MSCRATCH,
+            CsrField::SSCRATCH => CsrId::SSCRATCH,
+            CsrField::MEPC => CsrId::MEPC,
+            CsrField::SEPC => CsrId::SEPC,
+            CsrField::MTVAL => CsrId::MTVAL,
+            CsrField::STVAL => CsrId::STVAL,
+            CsrField::MODE | CsrField::ASID | CsrField::PPN => CsrId::SATP,
+            CsrField::MXL | CsrField::Extensions => CsrId::MISA,
+            CsrField::UXL | CsrField::SXL | CsrField::TSR | CsrField::TW | CsrField::TVM | CsrField::MPRV | CsrField::MPP | CsrField::MPIE | CsrField::MIE | CsrField::SD | CsrField::MXR | CsrField::SUM | CsrField::XS | CsrField::FS | CsrField::SPP | CsrField::SPIE | CsrField::SIE | CsrField::UPIE | CsrField::UIE => CsrId::MSTATUS,
+            CsrField::MCauseInterrupt | CsrField::MCauseCode => CsrId::MCAUSE,
+            CsrField::SCauseInterrupt | CsrField::SCauseCode => CsrId::SCAUSE,
+        }
+    }
+
+    pub fn offset<T : MachineInteger>(&self) -> u32 {
+        match self {
+            CsrField::Bank => 7,
+            CsrField::MXL => T::XLEN - 2,
+            CsrField::TSR => 22,
+            CsrField::TW => 21,
+            CsrField::TVM => 20,
+            CsrField::MPRV => 17,
+            CsrField::MPP => 11,
+            CsrField::MPIE => 7,
+            CsrField::MIE => 3,
+            CsrField::UXL => 32,
+            CsrField::SXL => 34,
+            CsrField::MTVecBASE | CsrField::STVecBASE => 2,
+            CsrField::MEIE | CsrField::MEIP => 11,
+            CsrField::MTIP | CsrField::MTIE => 7,
+            CsrField::MSIP | CsrField::MSIE => 3,
+            CsrField::MCYCLEH | CsrField::MINSTRETH => 32,
+            CsrField::MHPMEN | CsrField::SHPMEN | CsrField::MHPMIN => 3,
+            CsrField::MIREN | CsrField::SIREN | CsrField::MIRIN => 2,
+            CsrField::MTMEN | CsrField::STMEN | CsrField::MTMIN => 1,
+            CsrField::MCauseInterrupt | CsrField::SCauseInterrupt => T::XLEN - 1,
+            CsrField::SD => T::XLEN - 1,
+            CsrField::MXR => 19,
+            CsrField::SUM => 18,
+            CsrField::XS => 15,
+            CsrField::FS => 13,
+            CsrField::SPP => 8,
+            CsrField::SPIE => 5,
+            CsrField::UPIE => 4,
+            CsrField::SIE => 1,
+            CsrField::SEIP | CsrField::SEIE => 9,
+            CsrField::UEIP | CsrField::UEIE => 8,
+            CsrField::STIP | CsrField::STIE => 5,
+            CsrField::UTIP | CsrField::UTIE => 4,
+            CsrField::SSIP | CsrField::SSIE => 1,
+            CsrField::MODE => 31,
+            CsrField::ASID => 22,
+            _ => 0,
+        }
+    }
+
+    // TODO finish implementation
+    pub fn mask<T : MachineInteger>(&self) -> T {
+        let xlen = T::XLEN as usize;
+        match self {
+            CsrField::TSR => T::slice_mask(23, 22),
+            CsrField::TW => T::slice_mask(22, 21),
+            CsrField::TVM => T::slice_mask(20, 21),
+            CsrField::MPRV => T::slice_mask(18, 17),
+            CsrField::MPP => T::slice_mask(13, 11),
+            CsrField::MPIE => T::slice_mask(8, 7),
+            CsrField::MIE => T::slice_mask(4, 3),
+            CsrField::USIE | CsrField::USIP => T::slice_mask(1, 0),
+            CsrField::SSIE | CsrField::SSIP => T::slice_mask(2, 1),
+            CsrField::UTIE | CsrField::UTIP => T::slice_mask(5, 4),
+            CsrField::STIE | CsrField::STIP => T::slice_mask(6, 5),
+            CsrField::UEIE | CsrField::UEIP => T::slice_mask(9, 8),
+            CsrField::SEIE | CsrField::SEIP => T::slice_mask(10, 9),
+            CsrField::MTVecMODE | CsrField::STVecMODE => T::slice_mask(2, 0),
+            CsrField::MTVecBASE | CsrField::STVecBASE => T::slice_mask(31, 2),
+            CsrField::MXR => T::slice_mask(20, 19),
+            CsrField::SUM  => T::slice_mask(19, 18),
+            CsrField::SPP  => T::slice_mask(9, 8),
+            CsrField::SPIE => T::slice_mask(6, 5),
+            CsrField::SIE  => T::slice_mask(2, 1),
+            CsrField::SCauseCode | CsrField::MCauseCode => T::slice_mask(xlen-1, 0),
+            CsrField::SCauseInterrupt | CsrField::MCauseInterrupt => T::slice_mask(xlen, xlen-1),
+            CsrField::MSIP | CsrField::MSIE => T::slice_mask(4, 3),
+            CsrField::MTIP | CsrField::MTIE => T::slice_mask(8, 7),
+            CsrField::MEIP | CsrField::MEIE => T::slice_mask(12, 11),
+            _ => T::all_set(),
         }
     }
 }

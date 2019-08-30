@@ -447,6 +447,8 @@ pub struct RV32IMachine {
     ex2mem: MemData,
     mem2wb: WriteBackData,
 
+    csr_file: [i32; 4096],
+
     memory: Box<dyn Memory>,
 }
 
@@ -472,8 +474,17 @@ impl RiscvIMachine for RV32IMachine {
         self.set_register(i, value)
     }
 
-    fn get_csr_field(&self, _i:CsrField) -> i32 { 0 }
-    fn set_csr_field(&mut self, _i:CsrField, _value:i32) {
+    fn get_csr_field(&self, i:CsrField) -> i32 {
+        let x = self.csr_file[i.get_csr_id().0 as usize];
+        (x & (i.mask::<i32>() as i32)) >> i.offset::<i32>()
+    }
+
+    fn set_csr_field(&mut self, i:CsrField, value:i32) {
+        let num : &mut i32 = &mut self.csr_file[i.get_csr_id().0 as usize];
+        let mask : i32 = i.mask();
+        let notmask = !mask;
+
+        *num = (*num & notmask) | (mask & (value << i.offset::<i32>()))
     }
 
     fn get_pc(&self) -> i32 { self.pc }
@@ -483,7 +494,8 @@ impl RiscvIMachine for RV32IMachine {
 impl RV32IMachine {
 
     pub fn new(mem:Box<dyn Memory>) -> RV32IMachine {
-        RV32IMachine {
+        let mut ret = RV32IMachine {
+            csr_file: [0; 4096],
             registers : [0; 31],
             pc: 0, 
             if2dc: PipelineState::empty(),
@@ -492,7 +504,10 @@ impl RV32IMachine {
                 addr: 0, size: WordSize::B, value: 0 },
             mem2wb: WriteBackData { perform: false, rd: 0, value: 0 },
             memory: mem,
-        }
+        };
+
+        ret.set_csr(CsrId::MISA, 0x40002000);
+        ret
     }
 
     pub fn get_register(&self, i:usize) -> i32 {
@@ -704,7 +719,7 @@ impl RV32IMachine {
                                         let mpie = self.get_csr_field(CsrField::UPIE);
                                         self.set_csr_field(CsrField::UIE, mpie);
                                         self.set_csr_field(CsrField::UPIE, 1);
-                                        self.set_pc(self.get_csr(CsrId::SEPC).unwrap());
+                                        self.set_pc(self.get_csr(CsrId::UEPC).unwrap());
                                     },
                                     _ => { }
                                 }
@@ -855,6 +870,7 @@ impl RV32IMachine {
     }
 
     fn do_fetch(&mut self) {
+        
         if self.pc % 4 != 0 { self.raise_exception(false, 0, 0, self.pc); }
         let i = Instruction(self.memory.get_32(self.pc as usize));
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
