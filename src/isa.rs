@@ -106,6 +106,7 @@ impl Instruction {
         ret
     }
 
+    // Per-instruction ctor
     pub fn lui(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::LUI as u8, rd, imm) }
     pub fn auipc(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::AUIPC as u8, rd, imm) }
     pub fn jal(rd:u8, imm:i32) -> Instruction { Self::create_j(OpCode::JAL as u8, rd, imm) }
@@ -124,7 +125,6 @@ impl Instruction {
     pub fn sb(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 0) }
     pub fn sh(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 1) }
     pub fn sw(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 2) }
-
     pub fn addi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 0) }
     pub fn slti(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 2) }
     pub fn sltiu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 3) }
@@ -134,7 +134,6 @@ impl Instruction {
     pub fn slli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 1) } 
     pub fn srli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 5) } 
     pub fn srai(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 261) } 
-
     pub fn add(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 0) }
     pub fn sub(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 256) }
     pub fn sll(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 1) }
@@ -145,13 +144,8 @@ impl Instruction {
     pub fn sra(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 261) }
     pub fn or(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 6) }
     pub fn and(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 7) }
-
-    pub fn fence(pred:u8, succ:u8) -> Instruction {
-        Self::create_i(OpCode::FENCE as u8, 0, 0, (pred << 4 | succ) as i32, 1)
-    }
-    pub fn fence1() -> Instruction {
-        Self::fence(0, 0)
-    }
+    pub fn fence(pred:u8, succ:u8) -> Instruction { Self::create_i(OpCode::FENCE as u8, 0, 0, (pred << 4 | succ) as i32, 1) }
+    pub fn fence1() -> Instruction { Self::fence(0, 0) }
 
     pub fn get_opcode(&self) -> u8 {
         (self.0 & 0x7F) as u8
@@ -273,36 +267,15 @@ impl Instruction {
     }
     
     pub fn get_type(&self) -> Type {
-        match self.get_opcode() {
-            0b0000011 => Type::I,
-            0b0010011 => Type::I,
-            0b1001111 => Type::I,
-            0b1110011 => Type::I,
-            0b0100011 => Type::S,
-            0b0110011 => Type::R,
-            0b0110111 => Type::U,
-            0b0010111 => Type::U,
-            0b1101111 => Type::J,
-            0b0001111 => Type::U,
-            0b1100011 => Type::B,
-            _ => Type::U,
-        }
+        self.get_opcode_enum().into()
     }
 
     pub fn get_opcode_enum(&self) -> OpCode {
-        let codes = &[ OpCode::LUI, OpCode::AUIPC, OpCode::JAL, OpCode::JALR
-        , OpCode::BRANCH, OpCode::LOAD, OpCode::STORE, OpCode::OPIMM
-        , OpCode::OPREG, OpCode::FENCE, OpCode::SYSTEM ];
-
-        for c in codes {
-            if *c as u8 == self.get_opcode() {
-                return *c
-            }
-        }
-
-        OpCode::INVALID
+        self.get_opcode().into()
     }
 
+    /// This function is mainly used as a helper for the fmt::Display trait
+    /// in order to pretty-print an instruction with println!()
     pub fn get_mnemonic(&self) -> &str {
         match self.get_opcode_enum() {
             OpCode::LUI => "lui",
@@ -387,18 +360,75 @@ pub enum Type {
 /// Enum naming the different opcodes values
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum OpCode {
-    LUI     = 0b0110111,
-    AUIPC   = 0b0010111,
-    JAL     = 0b1101111,
-    JALR    = 0b1001111,
-    BRANCH  = 0b1100011,
-    LOAD    = 0b0000011,
-    STORE   = 0b0100011,
-    OPIMM   = 0b0010011,
-    OPREG   = 0b0110011,
-    FENCE   = 0b0001111,
-    SYSTEM  = 0b1110011,
-    INVALID = 0,
+    LUI    ,
+    AUIPC  ,
+    JAL    ,
+    JALR   ,
+    BRANCH ,
+    LOAD   ,
+    STORE  ,
+    OPIMM  ,
+    OPREG  ,
+    FENCE  ,
+    SYSTEM ,
+    INVALID,
+}
+
+impl Into<Type> for OpCode {
+    fn into(self) -> Type {
+        match self {
+            OpCode::LUI     => Type::U,
+            OpCode::AUIPC   => Type::U,
+            OpCode::JAL     => Type::J,
+            OpCode::JALR    => Type::I,
+            OpCode::BRANCH  => Type::B,
+            OpCode::LOAD    => Type::I,
+            OpCode::STORE   => Type::S,
+            OpCode::OPIMM   => Type::I,
+            OpCode::OPREG   => Type::R,
+            OpCode::FENCE   => Type::U,
+            OpCode::SYSTEM  => Type::I,
+            _ => Type::U,
+        }
+    }
+}
+
+impl From<u8> for OpCode {
+    fn from(v:u8) -> OpCode {
+        match v {
+            0b0110111 => OpCode::LUI,
+            0b0010111 => OpCode::AUIPC,
+            0b1101111 => OpCode::JAL,
+            0b1001111 => OpCode::JALR,
+            0b1100011 => OpCode::BRANCH,
+            0b0000011 => OpCode::LOAD,
+            0b0100011 => OpCode::STORE,
+            0b0010011 => OpCode::OPIMM,
+            0b0110011 => OpCode::OPREG,
+            0b0001111 => OpCode::FENCE,
+            0b1110011 => OpCode::SYSTEM,
+            _ => OpCode::INVALID,
+        }
+    }
+}
+
+impl Into<u8> for OpCode {
+    fn into(self) -> u8 {
+        match self {
+            OpCode::LUI     => 0b0110111,
+            OpCode::AUIPC   => 0b0010111,
+            OpCode::JAL     => 0b1101111,
+            OpCode::JALR    => 0b1001111,
+            OpCode::BRANCH  => 0b1100011,
+            OpCode::LOAD    => 0b0000011,
+            OpCode::STORE   => 0b0100011,
+            OpCode::OPIMM   => 0b0010011,
+            OpCode::OPREG   => 0b0110011,
+            OpCode::FENCE   => 0b0001111,
+            OpCode::SYSTEM  => 0b1110011,
+            OpCode::INVALID => 0,
+        }
+    }
 }
 
 /// This type represents a CSR's (Control State Register) ID in the CSR table
@@ -604,17 +634,21 @@ impl CsrField {
             CsrField::MEIP | CsrField::SEIP | CsrField::UEIP | CsrField::MTIP |
                 CsrField::STIP | CsrField::UTIP | CsrField::MSIP | CsrField::SSIP |
                 CsrField::USIP => CsrId::MIP,
-            CsrField::MEIE | CsrField::SEIE | CsrField::UEIE | CsrField::MTIE | CsrField::STIE | CsrField::UTIE | CsrField::MSIE | CsrField::SSIE |
-                CsrField::USIE => CsrId::MIE,
+            CsrField::MEIE | CsrField::SEIE | CsrField::UEIE | CsrField::MTIE |
+                CsrField::STIE | CsrField::UTIE | CsrField::MSIE |
+                CsrField::SSIE | CsrField::USIE => CsrId::MIE,
             CsrField::MTIME => CsrId::TIME,
             CsrField::MTIMECMP => CsrId::TIME /* CsrId::TIMECMP */,
             CsrField::MINSTRET => CsrId::MINSTRET,
             CsrField::MINSTRETH => CsrId::MINSTRETH,
             CsrField::MCYCLE => CsrId::MCYCLE,
             CsrField::MCYCLEH => CsrId::MCYCLEH,
-            CsrField::MHPMEN | CsrField::MIREN | CsrField::MTMEN | CsrField::MCYEN => CsrId::MCOUNTEREN,
-            CsrField::MHPMIN | CsrField::MIRIN | CsrField::MTMIN | CsrField::MCYIN => CsrId::MCOUNTINHIBIT,
-            CsrField::SHPMEN | CsrField::SIREN | CsrField::STMEN | CsrField::SCYEN => CsrId::SCOUNTEREN,
+            CsrField::MHPMEN | CsrField::MIREN | CsrField::MTMEN |
+                CsrField::MCYEN => CsrId::MCOUNTEREN,
+            CsrField::MHPMIN | CsrField::MIRIN | CsrField::MTMIN |
+                CsrField::MCYIN => CsrId::MCOUNTINHIBIT,
+            CsrField::SHPMEN | CsrField::SIREN | CsrField::STMEN |
+                CsrField::SCYEN => CsrId::SCOUNTEREN,
             CsrField::MSCRATCH => CsrId::MSCRATCH,
             CsrField::SSCRATCH => CsrId::SSCRATCH,
             CsrField::MEPC => CsrId::MEPC,
@@ -623,7 +657,12 @@ impl CsrField {
             CsrField::STVAL => CsrId::STVAL,
             CsrField::MODE | CsrField::ASID | CsrField::PPN => CsrId::SATP,
             CsrField::MXL | CsrField::Extensions => CsrId::MISA,
-            CsrField::UXL | CsrField::SXL | CsrField::TSR | CsrField::TW | CsrField::TVM | CsrField::MPRV | CsrField::MPP | CsrField::MPIE | CsrField::MIE | CsrField::SD | CsrField::MXR | CsrField::SUM | CsrField::XS | CsrField::FS | CsrField::SPP | CsrField::SPIE | CsrField::SIE | CsrField::UPIE | CsrField::UIE => CsrId::MSTATUS,
+            CsrField::UXL | CsrField::SXL | CsrField::TSR | CsrField::TW |
+                CsrField::TVM | CsrField::MPRV | CsrField::MPP | CsrField::MPIE
+                | CsrField::MIE | CsrField::SD | CsrField::MXR | CsrField::SUM
+                | CsrField::XS | CsrField::FS | CsrField::SPP
+                | CsrField::SPIE | CsrField::SIE | CsrField::UPIE
+                | CsrField::UIE => CsrId::MSTATUS,
             CsrField::MCauseInterrupt | CsrField::MCauseCode => CsrId::MCAUSE,
             CsrField::SCauseInterrupt | CsrField::SCauseCode => CsrId::SCAUSE,
         }
@@ -695,8 +734,10 @@ impl CsrField {
             CsrField::SPP  => T::slice_mask(9, 8),
             CsrField::SPIE => T::slice_mask(6, 5),
             CsrField::SIE  => T::slice_mask(2, 1),
-            CsrField::SCauseCode | CsrField::MCauseCode => T::slice_mask(xlen-1, 0),
-            CsrField::SCauseInterrupt | CsrField::MCauseInterrupt => T::slice_mask(xlen, xlen-1),
+            CsrField::SCauseCode | CsrField::MCauseCode
+                => T::slice_mask(xlen-1, 0),
+            CsrField::SCauseInterrupt | CsrField::MCauseInterrupt
+                => T::slice_mask(xlen, xlen-1),
             CsrField::MSIP | CsrField::MSIE => T::slice_mask(4, 3),
             CsrField::MTIP | CsrField::MTIE => T::slice_mask(8, 7),
             CsrField::MEIP | CsrField::MEIE => T::slice_mask(12, 11),
