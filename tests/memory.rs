@@ -5,7 +5,7 @@ use riscv_sandbox::isa::{self, Instruction};
 
 #[test]
 fn vec_memory_impl() {
-    let i = Instruction::create_i(isa::OpCode::OPIMM as u8, 1, 1, 128, 0);
+    let i = Instruction::create_i(isa::OpCode::OPIMM, 1, 1, 128, 0);
     let mut mem : Vec<u8> = vec![0, 0, 0, 0];
 
     mem.set_32(0, i.0);

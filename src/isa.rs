@@ -19,10 +19,10 @@ impl Instruction {
     /// * `rs1` - The first operand register
     /// * `rs2` - The second operand register
     /// * `funct` - A 10bits number extending the opcode
-    pub fn create_r(opcode:u8, rd:u8, rs1:u8, rs2: u8, funct:u16) -> Instruction {
+    pub fn create_r(opcode:OpCode, rd:u8, rs1:u8, rs2: u8, funct:u16) -> Instruction {
         let mut ret = Instruction(0);
 
-        ret.set_opcode(opcode);
+        ret.set_opcode(opcode.into());
         ret.set_rd(rd);
         ret.set_rs1(rs1);
         ret.set_rs2(rs2);
@@ -39,10 +39,10 @@ impl Instruction {
     /// * `rs1` - The register operand
     /// * `imm` - The immediate operand on 12bits
     /// * `funct` - The function to perform (extension of the opcode, on 3bits)
-    pub fn create_i(opcode:u8, rd:u8, rs1:u8, imm:i32, funct:u8) -> Instruction {
+    pub fn create_i(opcode:OpCode, rd:u8, rs1:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Instruction(0);
 
-        ret.set_opcode(opcode);
+        ret.set_opcode(opcode.into());
         ret.set_rd(rd);
         ret.set_rs1(rs1);
         ret.set_imm_i(imm);
@@ -60,10 +60,10 @@ impl Instruction {
     /// * `rs2` - Second register operand
     /// * `imm` - Immediate operand on 12bits representing bits `[11:0]`
     /// * `funct` - A 3bits extension of the opcode
-    pub fn create_s(opcode:u8, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
+    pub fn create_s(opcode:OpCode, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Instruction(0);
 
-        ret.set_opcode(opcode);
+        ret.set_opcode(opcode.into());
         ret.set_rs1(rs1);
         ret.set_rs2(rs2);
         ret.set_imm_s(imm);
@@ -73,7 +73,7 @@ impl Instruction {
 
     /// Creates a B type RV32I instruction. These are S type instructions with
     /// a different immediate layout (the immediate on B represent bits `[12:1]`)
-    pub fn create_b(opcode:u8, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
+    pub fn create_b(opcode:OpCode, rs1:u8, rs2:u8, imm:i32, funct:u8) -> Instruction {
         let mut ret = Self::create_s(opcode, rs1, rs2, 0, funct);
 
         ret.set_imm_b(imm);
@@ -88,10 +88,10 @@ impl Instruction {
     /// * `opcode` - The opcode
     /// * `rd` - The destination register of the operation
     /// * `imm` - bits `[31:12]` of the 32bits immediate value
-    pub fn create_u(opcode:u8, rd: u8, imm:i32) -> Instruction {
+    pub fn create_u(opcode:OpCode, rd: u8, imm:i32) -> Instruction {
         let mut ret = Instruction(0);
 
-        ret.set_opcode(opcode);
+        ret.set_opcode(opcode.into());
         ret.set_rd(rd);
         ret.set_imm_u(imm);
         ret
@@ -99,7 +99,7 @@ impl Instruction {
 
     /// Creates a J type RV32I instruction. These are U type instructions with
     /// a different immediate layout (the immdiate on J represent bits `[19:0]`)
-    pub fn create_j(opcode:u8, rd:u8, imm:i32) -> Instruction {
+    pub fn create_j(opcode:OpCode, rd:u8, imm:i32) -> Instruction {
         let mut ret = Self::create_u(opcode, rd, 0);
 
         ret.set_imm_j(imm);
@@ -107,44 +107,44 @@ impl Instruction {
     }
 
     // Per-instruction ctor
-    pub fn lui(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::LUI as u8, rd, imm) }
-    pub fn auipc(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::AUIPC as u8, rd, imm) }
-    pub fn jal(rd:u8, imm:i32) -> Instruction { Self::create_j(OpCode::JAL as u8, rd, imm) }
-    pub fn jalr(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::JALR as u8, rd, rs1, imm, 0) }
-    pub fn beq(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 0) }
-    pub fn bne(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 1) }
-    pub fn blt(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 4) }
-    pub fn bge(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 5) }
-    pub fn bltu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 6) }
-    pub fn bgeu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 7) }
-    pub fn lb(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 0) }
-    pub fn lh(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 1) }
-    pub fn lw(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 2) }
-    pub fn lbu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 4) }
-    pub fn lhu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 5) }
-    pub fn sb(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 0) }
-    pub fn sh(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 1) }
-    pub fn sw(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 2) }
-    pub fn addi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 0) }
-    pub fn slti(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 2) }
-    pub fn sltiu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 3) }
-    pub fn xori(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 4) }
-    pub fn ori(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 6) }
-    pub fn andi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 7) }
-    pub fn slli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 1) } 
-    pub fn srli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 5) } 
-    pub fn srai(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 261) } 
-    pub fn add(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 0) }
-    pub fn sub(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 256) }
-    pub fn sll(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 1) }
-    pub fn slt(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 2) }
-    pub fn sltu(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 3) }
-    pub fn xor(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 4) }
-    pub fn srl(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 5) }
-    pub fn sra(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 261) }
-    pub fn or(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 6) }
-    pub fn and(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 7) }
-    pub fn fence(pred:u8, succ:u8) -> Instruction { Self::create_i(OpCode::FENCE as u8, 0, 0, (pred << 4 | succ) as i32, 1) }
+    pub fn lui(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::LUI, rd, imm) }
+    pub fn auipc(rd:u8, imm:i32) -> Instruction { Self::create_u(OpCode::AUIPC, rd, imm) }
+    pub fn jal(rd:u8, imm:i32) -> Instruction { Self::create_j(OpCode::JAL, rd, imm) }
+    pub fn jalr(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::JALR, rd, rs1, imm, 0) }
+    pub fn beq(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 0) }
+    pub fn bne(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 1) }
+    pub fn blt(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 4) }
+    pub fn bge(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 5) }
+    pub fn bltu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 6) }
+    pub fn bgeu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 7) }
+    pub fn lb(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 0) }
+    pub fn lh(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 1) }
+    pub fn lw(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 2) }
+    pub fn lbu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 4) }
+    pub fn lhu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 5) }
+    pub fn sb(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE, rs1, rs2, imm, 0) }
+    pub fn sh(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE, rs1, rs2, imm, 1) }
+    pub fn sw(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE, rs1, rs2, imm, 2) }
+    pub fn addi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 0) }
+    pub fn slti(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 2) }
+    pub fn sltiu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 3) }
+    pub fn xori(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 4) }
+    pub fn ori(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 6) }
+    pub fn andi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 7) }
+    pub fn slli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM, rd, rs1, shamt as u8, 1) } 
+    pub fn srli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM, rd, rs1, shamt as u8, 5) } 
+    pub fn srai(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM, rd, rs1, shamt as u8, 261) } 
+    pub fn add(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 0) }
+    pub fn sub(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 256) }
+    pub fn sll(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 1) }
+    pub fn slt(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 2) }
+    pub fn sltu(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 3) }
+    pub fn xor(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 4) }
+    pub fn srl(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 5) }
+    pub fn sra(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 261) }
+    pub fn or(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 6) }
+    pub fn and(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG, rd, rs1, rs2, 7) }
+    pub fn fence(pred:u8, succ:u8) -> Instruction { Self::create_i(OpCode::FENCE, 0, 0, (pred << 4 | succ) as i32, 1) }
     pub fn fence1() -> Instruction { Self::fence(0, 0) }
 
     pub fn get_opcode(&self) -> u8 {
@@ -297,7 +297,7 @@ impl Instruction {
                 _ => "load",
             } },
             OpCode::STORE => { match self.get_funct3() {
-                0 => "sb", 1 => "sh", 2 => "sw", _ => "store",
+                0 => "sb", 1 => "sh", 2 => "sw", _ => "illegal",
             } },
             OpCode::OPREG => { match self.get_funct10() {
                 0 => "add", 256 => "sub", 1 => "sll", 2 => "slt", 3 => "sltu",
@@ -305,12 +305,12 @@ impl Instruction {
                 _ => "opreg",
             } },
             OpCode::FENCE => { match self.get_funct3() {
-                0 => "fence", 1 => "fence.1", _ => "fence",
+                0 => "fence", 1 => "fence.1", _ => "illegal",
             } },
             OpCode::SYSTEM => { match self.get_funct7() {
                 _ => "sys",
             } },
-            _ => "nop",
+            OpCode::INVALID => "illegal",
         }
     }
 }
@@ -399,7 +399,7 @@ impl From<u8> for OpCode {
             0b0110111 => OpCode::LUI,
             0b0010111 => OpCode::AUIPC,
             0b1101111 => OpCode::JAL,
-            0b1001111 => OpCode::JALR,
+            0b1100111 => OpCode::JALR,
             0b1100011 => OpCode::BRANCH,
             0b0000011 => OpCode::LOAD,
             0b0100011 => OpCode::STORE,
@@ -418,7 +418,7 @@ impl Into<u8> for OpCode {
             OpCode::LUI     => 0b0110111,
             OpCode::AUIPC   => 0b0010111,
             OpCode::JAL     => 0b1101111,
-            OpCode::JALR    => 0b1001111,
+            OpCode::JALR    => 0b1100111,
             OpCode::BRANCH  => 0b1100011,
             OpCode::LOAD    => 0b0000011,
             OpCode::STORE   => 0b0100011,

@@ -4,8 +4,8 @@ use riscv_sandbox::isa::{Instruction, OpCode};
 
 #[test]
 fn r_ctor() {
-    let i = Instruction::create_r(1, 2, 3, 4, 0b11111);
-    assert_eq!(i.get_opcode(), 1);
+    let i = Instruction::create_r(OpCode::JAL, 2, 3, 4, 0b11111);
+    assert_eq!(i.get_opcode(), OpCode::JAL.into());
     assert_eq!(i.get_rd(), 2);
     assert_eq!(i.get_rs1(), 3);
     assert_eq!(i.get_rs2(), 4);
@@ -14,8 +14,8 @@ fn r_ctor() {
 
 #[test]
 fn i_ctor() {
-    let i = Instruction::create_i(1, 2, 3, 4, 5);
-    assert_eq!(i.get_opcode(), 1);
+    let i = Instruction::create_i(OpCode::JALR, 2, 3, 4, 5);
+    assert_eq!(i.get_opcode(), OpCode::JALR.into());
     assert_eq!(i.get_rd(), 2);
     assert_eq!(i.get_rs1(), 3);
     assert_eq!(i.get_imm_i(), 4);
@@ -24,8 +24,8 @@ fn i_ctor() {
 
 #[test]
 fn s_ctor() {
-    let i = Instruction::create_s(1, 2, 3, 0b111111, 5);
-    assert_eq!(i.get_opcode(), 1);
+    let i = Instruction::create_s(OpCode::AUIPC, 2, 3, 0b111111, 5);
+    assert_eq!(i.get_opcode(), OpCode::AUIPC.into());
     assert_eq!(i.get_rs1(), 2);
     assert_eq!(i.get_rs2(), 3);
     assert_eq!(i.get_imm_s(), 0b111111);
@@ -34,8 +34,8 @@ fn s_ctor() {
 
 #[test]
 fn u_ctor() {
-    let i = Instruction::create_u(1, 2, 0xF000);
-    assert_eq!(i.get_opcode(), 1);
+    let i = Instruction::create_u(OpCode::OPREG, 2, 0xF000);
+    assert_eq!(i.get_opcode(), OpCode::OPREG.into());
     assert_eq!(i.get_rd(), 2);
     assert_eq!(i.get_imm_u(), 0xF000);
 }
@@ -123,17 +123,17 @@ fn imm_j() {
 
 #[test]
 fn addi() {
-    let i = Instruction::create_i(OpCode::OPIMM as u8, 1, 1, 128, 0);
+    let i = Instruction::create_i(OpCode::OPIMM, 1, 1, 128, 0);
     assert_eq!(i.get_rd(), 1);
     assert_eq!(i.get_rs1(), 1);
     assert_eq!(i.get_imm_i(), 128);
-    assert_eq!(i.get_opcode(), OpCode::OPIMM as u8);
+    assert_eq!(i.get_opcode(), OpCode::OPIMM.into());
     assert_eq!(i.get_funct3(), 0);
 }
 
 #[test]
 fn imm_i_bit_extend() {
-    let i = Instruction::create_i(0, 0, 0, 0xFFF, 0);
+    let i = Instruction::create_i(OpCode::INVALID, 0, 0, 0xFFF, 0);
     assert_eq!(i.get_imm_i(), 0xFFFFFFFFu32 as i32);
 }
 
