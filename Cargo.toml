@@ -6,3 +6,4 @@ description = "RISC-V implementation for educational purpose."
 license = "MIT"
 
 [dependencies]
+elf = "*"

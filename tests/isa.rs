@@ -136,3 +136,23 @@ fn imm_i_bit_extend() {
     let i = Instruction::create_i(0, 0, 0, 0xFFF, 0);
     assert_eq!(i.get_imm_i(), 0xFFFFFFFFu32 as i32);
 }
+
+#[test]
+fn display_i() {
+    assert_eq!(format!("{}", Instruction::addi(0, 1, 128)), "addi r0 = r1, 128");
+    assert_eq!(format!("{}", Instruction::slti(1, 2, 64)), "slti r1 = r2, 64");
+    assert_eq!(format!("{}", Instruction::srai(1, 2, 2)), "srai r1 = r2, 2");
+}
+
+#[test]
+fn display_r() {
+    assert_eq!(format!("{}", Instruction::add(0, 1, 2)), "add r0 = r1, r2");
+    assert_eq!(format!("{}", Instruction::sra(0, 1, 2)), "sra r0 = r1, r2");
+    assert_eq!(format!("{}", Instruction::and(0, 1, 2)), "and r0 = r1, r2");
+}
+
+#[test]
+fn display_branch() {
+    assert_eq!(format!("{}", Instruction::beq(0, 1, 50)), "beq @pc+50 if r0 $ r1");
+    assert_eq!(format!("{}", Instruction::bne(4, 2, 512)), "bne @pc+512 if r4 $ r2");
+}

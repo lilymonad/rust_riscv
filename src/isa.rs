@@ -1,4 +1,5 @@
 use types::MachineInteger;
+use std::fmt;
 
 /// Base structure of an instruction in the RV32I format
 /// (just an unsigned 32bits int)
@@ -115,8 +116,42 @@ impl Instruction {
     pub fn bge(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 5) }
     pub fn bltu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 6) }
     pub fn bgeu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH as u8, rs1, rs2, imm, 7) }
-    pub fn add(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 0) }
+    pub fn lb(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 0) }
+    pub fn lh(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 1) }
+    pub fn lw(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 2) }
+    pub fn lbu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 4) }
+    pub fn lhu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD as u8, rd, rs1, imm, 5) }
+    pub fn sb(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 0) }
+    pub fn sh(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 1) }
+    pub fn sw(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE as u8, rs1, rs2, imm, 2) }
+
     pub fn addi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 0) }
+    pub fn slti(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 2) }
+    pub fn sltiu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 3) }
+    pub fn xori(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 4) }
+    pub fn ori(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 6) }
+    pub fn andi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM as u8, rd, rs1, imm, 7) }
+    pub fn slli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 1) } 
+    pub fn srli(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 5) } 
+    pub fn srai(rd:u8, rs1:u8, shamt:i32) -> Instruction { Self::create_r(OpCode::OPIMM as u8, rd, rs1, shamt as u8, 261) } 
+
+    pub fn add(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 0) }
+    pub fn sub(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 256) }
+    pub fn sll(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 1) }
+    pub fn slt(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 2) }
+    pub fn sltu(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 3) }
+    pub fn xor(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 4) }
+    pub fn srl(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 5) }
+    pub fn sra(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 261) }
+    pub fn or(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 6) }
+    pub fn and(rd:u8, rs1:u8, rs2:u8) -> Instruction { Self::create_r(OpCode::OPREG as u8, rd, rs1, rs2, 7) }
+
+    pub fn fence(pred:u8, succ:u8) -> Instruction {
+        Self::create_i(OpCode::FENCE as u8, 0, 0, (pred << 4 | succ) as i32, 1)
+    }
+    pub fn fence1() -> Instruction {
+        Self::fence(0, 0)
+    }
 
     pub fn get_opcode(&self) -> u8 {
         (self.0 & 0x7F) as u8
@@ -167,7 +202,7 @@ impl Instruction {
     }
 
     pub fn get_funct10(&self) -> u16 {
-        ((self.get_funct7() << 3) | (self.get_funct3())) as u16
+        ((self.get_funct7() as u16) << 3) | (self.get_funct3() as u16)
     }
 
     pub fn set_funct10(&mut self, funct10:u16) {
@@ -212,7 +247,7 @@ impl Instruction {
     }
 
     pub fn set_imm_b(&mut self, imm:i32) {
-        self.0 &= 0x01FFE07F;
+        self.0 &= 0x01FFF07F;
 
         self.0 |= ((imm & 0x1000) << 19) as u32;
         self.0 |= ((imm & 0x0800) >> 4) as u32;
@@ -266,6 +301,75 @@ impl Instruction {
         }
 
         OpCode::INVALID
+    }
+
+    pub fn get_mnemonic(&self) -> &str {
+        match self.get_opcode_enum() {
+            OpCode::LUI => "lui",
+            OpCode::AUIPC => "auipc",
+            OpCode::JAL => "jal",
+            OpCode::JALR => "jalr",
+            OpCode::OPIMM => { match self.get_funct3() {
+                0 => "addi", 2 => "slti", 3 => "sltiu", 4 => "xori", 6 => "ori",
+                7 => "andi", 1 => "slli",
+                5 => { match self.get_funct7() { 0 => "srli", 32 => "srai", _ => "opimm" } },
+                _ => "opimm",
+            } },
+            OpCode::BRANCH => { match self.get_funct3() {
+                0 => "beq", 1 => "bne", 4 => "blt", 5 => "bge", 6 => "bltu",
+                7 => "bgeu", _ => "illegal",
+            } },
+            OpCode::LOAD => { match self.get_funct3() {
+                0 => "lb", 1 => "lh", 2 => "lw", 4 => "lbu", 5 => "lhu",
+                _ => "load",
+            } },
+            OpCode::STORE => { match self.get_funct3() {
+                0 => "sb", 1 => "sh", 2 => "sw", _ => "store",
+            } },
+            OpCode::OPREG => { match self.get_funct10() {
+                0 => "add", 256 => "sub", 1 => "sll", 2 => "slt", 3 => "sltu",
+                4 => "xor", 5 => "srl", 261 => "sra", 6 => "or", 7 => "and",
+                _ => "opreg",
+            } },
+            OpCode::FENCE => { match self.get_funct3() {
+                0 => "fence", 1 => "fence.1", _ => "fence",
+            } },
+            OpCode::SYSTEM => { match self.get_funct7() {
+                _ => "sys",
+            } },
+            _ => "nop",
+        }
+    }
+}
+
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.get_type() {
+            Type::R => {
+                write!(f, "{} r{} = r{}, r{}", self.get_mnemonic(), self.get_rd(), self.get_rs1(), self.get_rs2())
+            },
+            Type::I => {
+                let mnemonic = self.get_mnemonic();
+                let imm = 
+                    if mnemonic == "srli" || mnemonic == "srai"
+                        { self.get_rs2() as i32 }
+                    else
+                        { self.get_imm_i() };
+                write!(f, "{} r{} = r{}, {}", mnemonic, self.get_rd(), self.get_rs1(), imm)
+            },
+            Type::S => {
+                write!(f, "{} r{} @ r{}+{}", self.get_mnemonic(), self.get_rs1(), self.get_rs2(), self.get_imm_s())
+            },
+            Type::B => {
+                write!(f, "{} @pc+{} if r{} $ r{}", self.get_mnemonic(), self.get_imm_b(), self.get_rs1(), self.get_rs2())
+            },
+            Type::U => {
+                write!(f, "{} r{}, {}", self.get_mnemonic(), self.get_rd(), self.get_imm_u())
+            },
+            Type::J => {
+                write!(f, "{} {}, ret r{}", self.get_mnemonic(), self.get_imm_j(), self.get_rd())
+            },
+        }
     }
 }
 
