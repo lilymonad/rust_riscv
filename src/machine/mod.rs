@@ -104,12 +104,12 @@ pub trait IntegerMachine {
             },
             CsrId::MCYCLE => { 
                 let prv = self.get_privilege();
-                let permS = self.get_csr_field(CsrField::MCYEN);
-                let permU = self.get_csr_field(CsrField::SCYEN);
+                let perm_s = self.get_csr_field(CsrField::MCYEN);
+                let perm_u = self.get_csr_field(CsrField::SCYEN);
                 let one = Self::IntegerType::from(1);
                 if prv == 0b11
-                    || prv == 0b01 && permS == one
-                    || prv == 0b00 && permS == one && permU == one {
+                    || prv == 0b01 && perm_s == one
+                    || prv == 0b00 && perm_s == one && perm_u == one {
                     Some(self.get_csr_field(CsrField::MCYCLE))
                 } else {
                     None
@@ -117,12 +117,12 @@ pub trait IntegerMachine {
             },
             CsrId::MCYCLEH => {
                 let prv = self.get_privilege();
-                let permS = self.get_csr_field(CsrField::MCYEN);
-                let permU = self.get_csr_field(CsrField::SCYEN);
+                let perm_s = self.get_csr_field(CsrField::MCYEN);
+                let perm_u = self.get_csr_field(CsrField::SCYEN);
                 let one = Self::IntegerType::from(1);
                 if prv == 0b11
-                    || prv == 0b01 && permS == one
-                    || prv == 0b00 && permS == one && permU == one {
+                    || prv == 0b01 && perm_s == one
+                    || prv == 0b00 && perm_s == one && perm_u == one {
                         Some(
                 if Self::IntegerType::XLEN == 32 {
                     self.get_csr_field(CsrField::MCYCLEH) >> 32
@@ -131,23 +131,23 @@ pub trait IntegerMachine {
             },
             CsrId::MINSTRET => {
                 let prv = self.get_privilege();
-                let permS = self.get_csr_field(CsrField::MCYEN);
-                let permU = self.get_csr_field(CsrField::SCYEN);
+                let perm_s = self.get_csr_field(CsrField::MCYEN);
+                let perm_u = self.get_csr_field(CsrField::SCYEN);
                 let one = Self::IntegerType::from(1);
                 if prv == 0b11
-                    || prv == 0b01 && permS == one
-                    || prv == 0b00 && permS == one && permU == one {
+                    || prv == 0b01 && perm_s == one
+                    || prv == 0b00 && perm_s == one && perm_u == one {
                 Some(self.get_csr_field(CsrField::MINSTRET))
                 } else { None }
             },
             CsrId::MINSTRETH => {
                 let prv = self.get_privilege();
-                let permS = self.get_csr_field(CsrField::MCYEN);
-                let permU = self.get_csr_field(CsrField::SCYEN);
+                let perm_s = self.get_csr_field(CsrField::MCYEN);
+                let perm_u = self.get_csr_field(CsrField::SCYEN);
                 let one = Self::IntegerType::from(1);
                 if prv == 0b11
-                    || prv == 0b01 && permS == one
-                    || prv == 0b00 && permS == one && permU == one {
+                    || prv == 0b01 && perm_s == one
+                    || prv == 0b00 && perm_s == one && perm_u == one {
                     Some(
                     if Self::IntegerType::XLEN == 32 {
                         self.get_csr_field(CsrField::MINSTRETH) >> 32
