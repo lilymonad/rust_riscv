@@ -147,6 +147,8 @@ impl Instruction {
     pub fn fence(pred:u8, succ:u8) -> Instruction { Self::create_i(OpCode::FENCE, 0, 0, (pred << 4 | succ) as i32, 1) }
     pub fn fence1() -> Instruction { Self::fence(0, 0) }
 
+    pub fn nop() -> Instruction { Self::addi(0, 0, 0) }
+
     pub fn get_opcode(&self) -> u8 {
         (self.0 & 0x7F) as u8
     }
@@ -331,7 +333,7 @@ impl fmt::Display for Instruction {
                 write!(f, "{} r{} = r{}, {}", mnemonic, self.get_rd(), self.get_rs1(), imm)
             },
             Type::S => {
-                write!(f, "{} r{} @ r{}+{}", self.get_mnemonic(), self.get_rs1(), self.get_rs2(), self.get_imm_s())
+                write!(f, "{} r{} @ r{}+{}", self.get_mnemonic(), self.get_rs2(), self.get_rs1(), self.get_imm_s())
             },
             Type::B => {
                 write!(f, "{} @pc+{} if r{} $ r{}", self.get_mnemonic(), self.get_imm_b(), self.get_rs1(), self.get_rs2())
