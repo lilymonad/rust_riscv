@@ -1,4 +1,5 @@
 pub mod rv32i;
+pub mod rv32pthread;
 
 use types::MachineInteger;
 use isa::{CsrId, CsrField};

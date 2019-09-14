@@ -1,13 +1,16 @@
 extern crate riscv_sandbox;
 
 use riscv_sandbox::memory::Memory;
-use riscv_sandbox::machine::*;
+use riscv_sandbox::machine::{self, rv32i::Machine as RV32I, rv32pthread::Machine as RV32Quad, *};
 use riscv_sandbox::isa::{Instruction, OpCode};
+
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[test]
 fn registers() {
     let mut mem : Vec<u8> = Vec::new();
-    let mut proc = rv32i::Machine::new(Box::new(mem));
+    let mut proc = RV32I::new(Rc::new(RefCell::new(mem)));
 
     for i in 0..31 {
         assert_eq!(proc.get_register(i as usize), 0);
@@ -27,7 +30,7 @@ fn execute_addi() {
 
     memory.set_32(0, add.0);
 
-    let mut machine = rv32i::Machine::new(Box::new(memory));
+    let mut machine = RV32I::new(Rc::new(RefCell::new(memory)));
 
     // perform a whole instruction cycle
     machine.cycle(); // fetch
@@ -69,7 +72,7 @@ fn simple_math() {
     memory.push(0);
     memory.push(0);
 
-    let mut machine = rv32i::Machine::new(Box::new(memory));
+    let mut machine = RV32I::new(Rc::new(RefCell::new(memory)));
 
     // start + lui
     machine.cycle();
@@ -121,7 +124,7 @@ fn fibonacci() {
     memory.push(nop); // 60
     memory.push(nop); // 64
 
-    let mut machine = rv32i::Machine::new(Box::new(memory));
+    let mut machine = RV32I::new(Rc::new(RefCell::new(memory)));
 
     while machine.get_pc() != 64 {
         machine.cycle();
