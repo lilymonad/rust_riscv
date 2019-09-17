@@ -1,7 +1,7 @@
 extern crate riscv_sandbox;
 
 use riscv_sandbox::memory::Memory;
-use riscv_sandbox::machine::{self, rv32i::Machine as RV32I, rv32pthread::Machine as RV32Quad, *};
+use riscv_sandbox::machine::{rv32i::Machine as RV32I, *};
 use riscv_sandbox::isa::{Instruction, OpCode};
 
 use std::rc::Rc;
@@ -9,7 +9,7 @@ use std::cell::RefCell;
 
 #[test]
 fn registers() {
-    let mut mem : Vec<u8> = Vec::new();
+    let mem : Vec<u8> = Vec::new();
     let mut proc = RV32I::new(Rc::new(RefCell::new(mem)));
 
     for i in 0..31 {
