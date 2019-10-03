@@ -1,5 +1,5 @@
 use machine::IntegerMachine;
-use isa::{Instruction, OpCode, CsrId, CsrField};
+use isa::{Instruction, OpCode, CsrField};
 use memory::Memory;
 use machine::rv32i::{self, Machine as RV32I};
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ pub struct Machine<T : Memory> {
     cores : [ RV32I<T> ; 4 ],
     joining : [ i32 ; 4 ],
     current_core : usize,
-    threads : Vec<ThreadData>,
+    //threads : Vec<ThreadData>,
     active_threads : usize,
     cycles : i32,
     plt_addresses : HashMap<i32, String>,
@@ -29,7 +29,7 @@ impl<T : Memory> Machine<T> {
                     , RV32I::new(mem.clone()), RV32I::new(mem.clone()) ],
             joining : [ -1 ; 4 ],
             current_core : 0,
-            threads : vec![ ThreadData { registers: [ 0 ; 31 ], pc: 0 } ],
+            //threads : vec![ ThreadData { registers: [ 0 ; 31 ], pc: 0 } ],
             active_threads : 1,
             cycles : 0,
             plt_addresses : plt,
@@ -85,14 +85,14 @@ impl<T : Memory> Machine<T> {
                         value : 0,
                     };
 
-                    println!("[SIM] new thread on core {} at 0x{:x} (sp=s0={:x})", i, npc, (-1024) * i as i32)
+                    //println!("[SIM] new thread on core {} at 0x{:x} (sp=s0={:x})", i, npc, (-1024) * i as i32)
                 }
                 else if func_name.contains("pthread_join") {
                     let to_wait = self.cores[curr].get_i_register(10);
                     self.joining[curr] = to_wait;
                     self.cores[curr].dc2ex.instruction = Instruction::addi(0, 0, 0);
                     self.schedule_next_core();
-                    println!("[SIM] thread {} waiting for {} to join", curr, to_wait)
+                    //println!("[SIM] thread {} waiting for {} to join", curr, to_wait)
                 }
                 else if func_name.contains("puts") {
                     let mut str_addr = self.get_i_register(10) as usize;
