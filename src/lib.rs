@@ -4,6 +4,7 @@
 //! [RISC-V ISA specification](https://riscv.org/specifications/).
 
 extern crate elf as elflib;
+extern crate bitvec;
 
 /// The ISA module containing everything related to instruction format.
 pub mod isa;

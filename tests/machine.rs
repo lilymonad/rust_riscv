@@ -10,7 +10,7 @@ use std::cell::RefCell;
 #[test]
 fn registers() {
     let mem : Vec<u8> = Vec::new();
-    let mut proc = RV32I::new(Rc::new(RefCell::new(mem)));
+    let mut proc = RV32I::new();
 
     for i in 0..31 {
         assert_eq!(proc.get_register(i as usize), 0);
@@ -30,14 +30,14 @@ fn execute_addi() {
 
     memory.set_32(0, add.0);
 
-    let mut machine = RV32I::new(Rc::new(RefCell::new(memory)));
+    let mut machine = RV32I::new();
 
     // perform a whole instruction cycle
-    machine.cycle(); // fetch
-    machine.cycle(); // decode
-    machine.cycle(); // exec
-    machine.cycle(); // mem
-    machine.cycle(); // writeback
+    machine.cycle(&mut memory); // fetch
+    machine.cycle(&mut memory); // decode
+    machine.cycle(&mut memory); // exec
+    machine.cycle(&mut memory); // mem
+    machine.cycle(&mut memory); // writeback
 
     assert_eq!(machine.get_register(1), 0x7FF);
 }
@@ -72,26 +72,26 @@ fn simple_math() {
     memory.push(0);
     memory.push(0);
 
-    let mut machine = RV32I::new(Rc::new(RefCell::new(memory)));
+    let mut machine = RV32I::new();
 
     // start + lui
-    machine.cycle();
-    machine.cycle();
-    machine.cycle();
-    machine.cycle();
+    machine.cycle(&mut memory);
+    machine.cycle(&mut memory);
+    machine.cycle(&mut memory);
+    machine.cycle(&mut memory);
     assert_eq!(machine.get_register(1), 0x79ABC000u32 as i32);
-    machine.cycle(); // addi 1
-    machine.cycle(); // addi 2
+    machine.cycle(&mut memory); // addi 1
+    machine.cycle(&mut memory); // addi 2
     assert_eq!(machine.get_register(1), 0x79ABCDEEu32 as i32);
-    machine.cycle(); // srli
+    machine.cycle(&mut memory); // srli
     assert_eq!(machine.get_register(2), 0x3CD5E6F7u32 as i32);
-    machine.cycle(); // slli
+    machine.cycle(&mut memory); // slli
     assert_eq!(machine.get_register(2), 0xF3579BDCu32 as i32);
-    machine.cycle(); // srai
+    machine.cycle(&mut memory); // srai
     assert_eq!(machine.get_register(2), 0xF9ABCDEEu32 as i32);
-    machine.cycle(); // add
+    machine.cycle(&mut memory); // add
     assert_eq!(machine.get_register(2), 0x73579BDCu32 as i32);
-    machine.cycle(); // sub
+    machine.cycle(&mut memory); // sub
     assert_eq!(machine.get_register(1), 0x06543212u32 as i32);
 }
 
@@ -124,10 +124,10 @@ fn fibonacci() {
     memory.push(nop); // 60
     memory.push(nop); // 64
 
-    let mut machine = RV32I::new(Rc::new(RefCell::new(memory)));
+    let mut machine = RV32I::new();
 
     while machine.get_pc() != 64 {
-        machine.cycle();
+        machine.cycle(&mut memory);
     }
 
     assert_eq!(machine.get_register(1), 5);

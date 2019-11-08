@@ -3,37 +3,33 @@ use isa::{Instruction, OpCode, CsrField};
 use memory::Memory;
 use machine::rv32i::{self, Machine as RV32I};
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 struct ThreadData {
     pub registers : [ i32; 31 ],
     pub pc : i32,
 }
 
-pub struct Machine<T : Memory> {
-    cores : [ RV32I<T> ; 4 ],
+pub struct Machine {
+    cores : [ RV32I ; 4 ],
     joining : [ i32 ; 4 ],
     current_core : usize,
     //threads : Vec<ThreadData>,
     active_threads : usize,
     cycles : i32,
     plt_addresses : HashMap<i32, String>,
-    memory : Rc<RefCell<T>>,
 }
 
-impl<T : Memory> Machine<T> {
-    pub fn new(mem:Rc<RefCell<T>>, plt:HashMap<i32, String>) -> Machine<T> {
+impl Machine {
+    pub fn new(plt:HashMap<i32, String>) -> Machine {
         Machine {
-            cores : [ RV32I::new(mem.clone()), RV32I::new(mem.clone())
-                    , RV32I::new(mem.clone()), RV32I::new(mem.clone()) ],
+            cores : [ RV32I::new(), RV32I::new()
+                    , RV32I::new(), RV32I::new() ],
             joining : [ -1 ; 4 ],
             current_core : 0,
             //threads : vec![ ThreadData { registers: [ 0 ; 31 ], pc: 0 } ],
             active_threads : 1,
             cycles : 0,
             plt_addresses : plt,
-            memory : mem,
         }
     }
 
@@ -55,11 +51,11 @@ impl<T : Memory> Machine<T> {
         self.cores[self.current_core].do_write_back()
     }
 
-    fn do_mem(&mut self) {
-        self.cores[self.current_core].do_mem()
+    fn do_mem(&mut self, mem:&mut dyn Memory) {
+        self.cores[self.current_core].do_mem(mem)
     }
 
-    fn do_execute(&mut self) {
+    fn do_execute(&mut self, mem:&mut dyn Memory) {
         let curr = self.current_core;
         let curr_pc = self.cores[curr].dc2ex.pc;
         let i = self.cores[curr].dc2ex.instruction;
@@ -77,7 +73,7 @@ impl<T : Memory> Machine<T> {
                     self.cores[i].set_i_register(2, (-1024) * i as i32);
                     self.cores[i].set_i_register(8, (-1024) * i as i32);
 
-                    self.memory.borrow_mut().set_32(self.cores[curr].get_i_register(10) as usize, i as u32);
+                    mem.set_32(self.cores[curr].get_i_register(10) as usize, i as u32);
                     self.cores[curr].set_i_register(10, 0);
                     self.cores[curr].mem2wb = rv32i::WriteBackData {
                         perform : false,
@@ -96,10 +92,9 @@ impl<T : Memory> Machine<T> {
                 }
                 else if func_name.contains("puts") {
                     let mut str_addr = self.get_i_register(10) as usize;
-                    let mem = self.memory.borrow();
                     let mut byte = mem.get_8(str_addr); let mut s = String::new();
                     while byte != 0 {
-                        byte = self.memory.borrow().get_8(str_addr);
+                        byte = mem.get_8(str_addr);
                         s.push(byte as char);
                         str_addr += 1
                     }
@@ -125,7 +120,7 @@ impl<T : Memory> Machine<T> {
         self.cores[self.current_core].do_decode()
     }
 
-    fn do_fetch(&mut self) {
+    fn do_fetch(&mut self, mem:&mut dyn Memory) {
         if self.cores[self.current_core].get_pc() == 0 {
             for i in 0..self.active_threads {
                 if self.joining[i] == self.current_core as i32 {
@@ -133,18 +128,18 @@ impl<T : Memory> Machine<T> {
                 }
             }
         } else {
-            self.cores[self.current_core].do_fetch()
+            self.cores[self.current_core].do_fetch(mem)
         }
     }
 }
 
-impl<T : Memory> IntegerMachine for Machine<T> {
+impl IntegerMachine for Machine {
     type IntegerType = i32;
 
     fn set_privilege(&mut self, _p : u8) { }
     fn get_privilege(&self) -> u8 { 0b11 }
 
-    fn cycle(&mut self) {
+    fn cycle(&mut self, mem:&mut dyn Memory) {
         self.cycles += 1;
         if self.cycles >= 10 {
             self.schedule_next_core()
@@ -152,10 +147,10 @@ impl<T : Memory> IntegerMachine for Machine<T> {
 
         println!("[SIM] === execute core {} ===", self.current_core);
         self.do_write_back();
-        self.do_mem();
-        self.do_execute();
+        self.do_mem(mem);
+        self.do_execute(mem);
         self.do_decode();
-        self.do_fetch();
+        self.do_fetch(mem);
     }
 
     fn get_i_register(&self, i:usize) -> i32 {

@@ -1,8 +1,6 @@
 use machine::IntegerMachine;
 use isa::{Instruction, OpCode, CsrId, CsrField};
 use memory::Memory;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 /// Represent the data which we need to send to the [write back] step
 #[derive(Debug)]
@@ -66,7 +64,7 @@ impl PipelineState {
     }
 }
 
-pub struct Machine<T:Memory> {
+pub struct Machine {
     pub registers: [i32; 31],
     pc: i32,
 
@@ -76,22 +74,20 @@ pub struct Machine<T:Memory> {
     pub mem2wb: WriteBackData,
 
     csr_file: [i32; 4096],
-
-    pub memory: Rc<RefCell<T>>,
 }
 
-impl<T:Memory> IntegerMachine for Machine<T> {
+impl IntegerMachine for Machine {
     type IntegerType = i32;
 
     fn set_privilege(&mut self, _p : u8) { }
     fn get_privilege(&self) -> u8 { 0b11 }
 
-    fn cycle(&mut self) {
+    fn cycle(&mut self, mem : &mut dyn Memory) {
         self.do_write_back();
-        self.do_mem();
+        self.do_mem(mem);
         self.do_execute();
         self.do_decode();
-        self.do_fetch();
+        self.do_fetch(mem);
     }
 
     fn get_i_register(&self, i:usize) -> i32 {
@@ -120,9 +116,9 @@ impl<T:Memory> IntegerMachine for Machine<T> {
     fn set_pc(&mut self, value:i32) { self.pc = value }
 }
 
-impl<T:Memory> Machine<T> {
+impl Machine {
 
-    pub fn new(mem:Rc<RefCell<T>>) -> Machine<T> {
+    pub fn new() -> Machine {
         let mut ret = Machine {
             csr_file: [0; 4096],
             registers : [0; 31],
@@ -132,7 +128,6 @@ impl<T:Memory> Machine<T> {
             ex2mem: MemData { pc: 0, wb_rd: 0, wb_perform: false, perform: None, 
                 addr: 0, size: WordSize::B, value: 0 },
             mem2wb: WriteBackData { perform: false, rd: 0, value: 0 },
-            memory: mem,
         };
 
         ret.set_csr(CsrId::MISA, 0x40002000);
@@ -154,17 +149,6 @@ impl<T:Memory> Machine<T> {
         }
     }
 
-    /// Executes a pipeline cycle
-    pub fn cycle(&mut self) {
-        // We perform operation in reverse order to simulate a pipeline. Each
-        // step must execute something based on previously computed last step.
-        self.do_write_back();
-        self.do_mem();
-        self.do_execute();
-        self.do_decode();
-        self.do_fetch()
-    }
-
     pub fn do_write_back(&mut self) {
         if self.mem2wb.perform {
             let rd = self.mem2wb.rd;
@@ -173,7 +157,7 @@ impl<T:Memory> Machine<T> {
         }
     }
 
-    pub fn do_mem(&mut self) {
+    pub fn do_mem(&mut self, mem: &mut dyn Memory) {
         let value : i32;
         let perform_wb : bool;
         let rd: usize = self.ex2mem.wb_rd;
@@ -182,9 +166,9 @@ impl<T:Memory> Machine<T> {
             Some(MemAction::Load) => {
                 perform_wb = true;
                 value = match self.ex2mem.size {
-                    WordSize::B => self.memory.borrow().get_8(self.ex2mem.addr) as i32,
-                    WordSize::H => self.memory.borrow().get_16(self.ex2mem.addr) as i32,
-                    WordSize::W => self.memory.borrow().get_32(self.ex2mem.addr) as i32,
+                    WordSize::B => mem.get_8(self.ex2mem.addr) as i32,
+                    WordSize::H => mem.get_16(self.ex2mem.addr) as i32,
+                    WordSize::W => mem.get_32(self.ex2mem.addr) as i32,
                     _ => 0,
                 };
             },
@@ -192,9 +176,9 @@ impl<T:Memory> Machine<T> {
                 let addr = self.ex2mem.addr;
                 let val  = self.ex2mem.value;
                 match self.ex2mem.size {
-                    WordSize::B => self.memory.borrow_mut().set_8(addr, val as u8),
-                    WordSize::H => self.memory.borrow_mut().set_16(addr, val as u16),
-                    WordSize::W => self.memory.borrow_mut().set_32(addr, val as u32),
+                    WordSize::B => mem.set_8(addr, val as u8),
+                    WordSize::H => mem.set_16(addr, val as u16),
+                    WordSize::W => mem.set_32(addr, val as u32),
                     _ => { },
                 }
                 perform_wb = false;
@@ -515,9 +499,9 @@ impl<T:Memory> Machine<T> {
         self.dc2ex = self.if2dc
     }
 
-    pub fn do_fetch(&mut self) {       
+    pub fn do_fetch(&mut self, mem:&mut dyn Memory) {
         if self.pc % 4 != 0 { self.raise_exception(false, 0, 0, self.pc); }
-        let i = Instruction(self.memory.borrow().get_32(self.pc as usize));
+        let i = Instruction(mem.get_32(self.pc as usize));
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
         self.pc += 4
     }

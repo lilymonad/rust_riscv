@@ -1,6 +1,14 @@
+
+/// A machine implementing the simplest RVI32 specification
 pub mod rv32i;
+
+/// A machine implementing "hardware threads" by emulating pthread library calls
 pub mod rv32pthread;
 
+/// An implementation of the SIMT-X machine (SIMT on CPU)
+pub mod simtx;
+
+use memory::Memory;
 use types::MachineInteger;
 use isa::{CsrId, CsrField};
 
@@ -10,7 +18,7 @@ pub trait IntegerMachine {
     type IntegerType : MachineInteger;
 
     /// A single clock cycle
-    fn cycle(&mut self);
+    fn cycle(&mut self, &mut dyn Memory);
 
     fn get_i_register(&self, id:usize) -> Self::IntegerType;
     fn set_i_register(&mut self, id:usize, value:Self::IntegerType);

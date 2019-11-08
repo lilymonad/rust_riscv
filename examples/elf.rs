@@ -51,14 +51,14 @@ fn main() {
         rodata_i += 1
     }
 
-    let mut machine = Machine::new(Rc::new(RefCell::new(code)), calls);
+    let mut machine = Machine::new(calls);
     println!("setting pc to 0x{:x}", pc as usize);
     machine.set_pc(pc);
     machine.set_i_register(1, 0);
     let mut i = 0;
     //for i in 0..500 {
     loop {
-        machine.cycle();
+        machine.cycle(&mut code);
         i += 1;
 
         if i > 5 && machine.get_i_register(2) == 0 {

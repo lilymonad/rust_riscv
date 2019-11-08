@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 /// Represents the main memory.
 /// It can be implemented by any structure which can handle loads and stores.
@@ -13,6 +15,30 @@ pub trait Memory {
     fn set_8(&mut self, addr:usize, value:u8);
     fn set_16(&mut self, addr:usize, value:u16);
     fn set_32(&mut self, addr:usize, value:u32);
+}
+
+/// Memory implementation for Rc<RefCell<dyn Memory>>.
+/// This kind of 
+impl<T:Memory> Memory for Rc<RefCell<T>> {
+    fn get_8(&self, addr:usize) -> u8 {
+        self.borrow().get_8(addr)
+    }
+    fn get_16(&self, addr:usize) -> u16 {
+        self.borrow().get_16(addr)
+    }
+    fn get_32(&self, addr:usize) -> u32 {
+        self.borrow().get_32(addr)
+    }
+
+    fn set_8(&mut self, addr:usize, value:u8) {
+        self.borrow_mut().set_8(addr, value)
+    }
+    fn set_16(&mut self, addr:usize, value:u16) {
+        self.borrow_mut().set_16(addr, value)
+    }
+    fn set_32(&mut self, addr:usize, value:u32) {
+        self.borrow_mut().set_32(addr, value)
+    }
 }
 
 /// Simple Memory implementation for [u8] slices
