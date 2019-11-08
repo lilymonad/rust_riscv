@@ -34,8 +34,8 @@ pub enum MemAction {
     Store,
 }
 
-/// Represent the data which we need to send to the [mem] step
-/// It also contains information to forward to the next step ([write back])
+/// Represent the data which we need to send to the `mem` step
+/// It also contains information to forward to the next step (`write back`)
 pub struct MemData {
     pub pc: i32,
 
