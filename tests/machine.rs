@@ -28,7 +28,7 @@ fn execute_addi() {
     let mut memory : Vec<u32> = vec![0,0,0,0,0,0,0,0];
     let add = Instruction::create_i(OpCode::OPIMM, 1, 1, 0x7FF, 0);
 
-    memory.set_32(0, add.0);
+    memory.set_32(0, add.be());
 
     let mut machine = RV32I::new();
 
@@ -47,24 +47,24 @@ fn simple_math() {
     let mut memory : Vec<u32> = Vec::new();
 
     // load32 0x79ABCDEE r1
-    memory.push(Instruction::create_u(OpCode::LUI, 1, 0x79ABC000u32 as i32).0);
-    memory.push(Instruction::create_i(OpCode::OPIMM, 1, 1, 0x6F7, 0).0);
-    memory.push(Instruction::create_i(OpCode::OPIMM, 1, 1, 0x6F7, 0).0);
+    memory.push(Instruction::create_u(OpCode::LUI, 1, 0x79ABC000u32 as i32).le());
+    memory.push(Instruction::create_i(OpCode::OPIMM, 1, 1, 0x6F7, 0).le());
+    memory.push(Instruction::create_i(OpCode::OPIMM, 1, 1, 0x6F7, 0).le());
 
     // srli r2 r1 1 ; r2 = 0x3CD5E6F7
-    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 1, 1, 0b101).0);
+    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 1, 1, 0b101).le());
 
     // slli r2 r2 2 ; r2 = 0xF3579BDC
-    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 2, 2, 0b001).0);
+    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 2, 2, 0b001).le());
 
     // srai r2 r2 1 ; r2 = 0xF9ABCDEE
-    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 2, 0x601, 0b101).0);
+    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 2, 0x601, 0b101).le());
 
     // add r2 r1 r2 ; r2 = 0x73579BDC
-    memory.push(Instruction::create_r(OpCode::OPREG, 2, 1, 2, 0).0);
+    memory.push(Instruction::create_r(OpCode::OPREG, 2, 1, 2, 0).le());
 
     // sub r1 r1 r2 ; r1 = 0x06543212
-    memory.push(Instruction::create_r(OpCode::OPREG, 1, 1, 2, 0x100).0);
+    memory.push(Instruction::create_r(OpCode::OPREG, 1, 1, 2, 0x100).le());
 
     memory.push(0);
     memory.push(0);
@@ -98,26 +98,26 @@ fn simple_math() {
 #[test]
 fn fibonacci() {
     let mut memory : Vec<u32> = Vec::new();
-    let nop = Instruction::create_i(OpCode::OPIMM, 0, 0, 0, 0).0;
+    let nop = Instruction::create_i(OpCode::OPIMM, 0, 0, 0, 0).le();
     // init logic registers (r1 - r3)
-    memory.push(Instruction::create_i(OpCode::OPIMM, 1, 0, 0, 0).0); // 0
-    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 0, 1, 0).0); // 4
+    memory.push(Instruction::create_i(OpCode::OPIMM, 1, 0, 0, 0).le()); // 0
+    memory.push(Instruction::create_i(OpCode::OPIMM, 2, 0, 1, 0).le()); // 4
 
     // r4 = loop trip count
-    memory.push(Instruction::create_i(OpCode::OPIMM, 4, 0, 0, 0).0); // 8
+    memory.push(Instruction::create_i(OpCode::OPIMM, 4, 0, 0, 0).le()); // 8
     // r5 = which term we want
-    memory.push(Instruction::create_i(OpCode::OPIMM, 5, 0, 5, 0).0); // 12
+    memory.push(Instruction::create_i(OpCode::OPIMM, 5, 0, 5, 0).le()); // 12
 
 
     // the code
-    memory.push(Instruction::create_b(OpCode::BRANCH, 4, 5, 32, 0).0); // 16
+    memory.push(Instruction::create_b(OpCode::BRANCH, 4, 5, 32, 0).le()); // 16
     memory.push(nop); // 20
     memory.push(nop); // 24
-    memory.push(Instruction::create_r(OpCode::OPREG, 3, 1, 2, 0).0); // 28
-    memory.push(Instruction::create_r(OpCode::OPREG, 1, 0, 2, 0).0); // 32
-    memory.push(Instruction::create_r(OpCode::OPREG, 2, 0, 3, 0).0); // 36
-    memory.push(Instruction::create_i(OpCode::OPIMM, 4, 4, 1, 0).0); // 40
-    memory.push(Instruction::create_j(OpCode::JAL, 0, -28).0); // 44
+    memory.push(Instruction::create_r(OpCode::OPREG, 3, 1, 2, 0).le()); // 28
+    memory.push(Instruction::create_r(OpCode::OPREG, 1, 0, 2, 0).le()); // 32
+    memory.push(Instruction::create_r(OpCode::OPREG, 2, 0, 3, 0).le()); // 36
+    memory.push(Instruction::create_i(OpCode::OPIMM, 4, 4, 1, 0).le()); // 40
+    memory.push(Instruction::create_j(OpCode::JAL, 0, -28).le()); // 44
     memory.push(nop); // 48
     memory.push(nop); // 52
     memory.push(nop); // 56

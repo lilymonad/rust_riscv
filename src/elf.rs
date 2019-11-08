@@ -7,9 +7,9 @@ pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> bool {
         let mut i = 0;
         while i < text.data.len() {
             let x = if file.ehdr.data == elflib::types::ELFDATA2LSB {
-                u32::from_be(text.data.get_32(i))
-            } else {
                 u32::from_le(text.data.get_32(i))
+            } else {
+                u32::from_be(text.data.get_32(i))
             };
 
             let addr = (text.shdr.addr as usize) + i;

@@ -276,6 +276,19 @@ impl Instruction {
         self.get_opcode().into()
     }
 
+    pub fn be(&self) -> u32 {
+        self.0
+    }
+
+    pub fn le(&self) -> u32 {
+        let one = self.0 << 24;
+        let two = (self.0 << 8) & 0x00FF0000;
+        let the = (self.0 >> 8) & 0x0000FF00;
+        let fou = self.0 >> 24;
+
+        one | two | the | fou
+    }
+
     /// This function is mainly used as a helper for the fmt::Display trait
     /// in order to pretty-print an instruction with println!()
     pub fn get_mnemonic(&self) -> &str {
