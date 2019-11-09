@@ -1,6 +1,6 @@
 
 /// A machine implementing the simplest RVI32 specification
-pub mod rv32i;
+pub mod rv32imc;
 
 /// A machine implementing "hardware threads" by emulating pthread library calls
 pub mod rv32pthread;

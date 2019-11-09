@@ -1,7 +1,7 @@
 use machine::IntegerMachine;
 use isa::{Instruction, OpCode, CsrField};
 use memory::Memory;
-use machine::rv32i::{self, Machine as RV32I};
+use machine::rv32imc::{self, Machine as RV32I};
 use std::collections::HashMap;
 
 struct ThreadData {
@@ -75,7 +75,7 @@ impl Machine {
 
                     mem.set_32(self.cores[curr].get_i_register(10) as usize, i as u32);
                     self.cores[curr].set_i_register(10, 0);
-                    self.cores[curr].mem2wb = rv32i::WriteBackData {
+                    self.cores[curr].mem2wb = rv32imc::WriteBackData {
                         perform : false,
                         rd : 0,
                         value : 0,
@@ -101,12 +101,12 @@ impl Machine {
                     println!("{}", s)
                 }
 
-                self.cores[self.current_core].ex2mem = rv32i::MemData {
+                self.cores[self.current_core].ex2mem = rv32imc::MemData {
                     value: curr_pc.wrapping_add(4),
                     pc: curr_pc,
                     wb_perform: true,
                     wb_rd: i.get_rd() as usize,
-                    perform: None, addr: 0, size: rv32i::WordSize::B,
+                    perform: None, addr: 0, size: rv32imc::WordSize::B,
                 }
             } else {
                 self.cores[curr].do_execute()

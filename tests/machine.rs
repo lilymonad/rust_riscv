@@ -1,7 +1,7 @@
 extern crate riscv_sandbox;
 
 use riscv_sandbox::memory::Memory;
-use riscv_sandbox::machine::{rv32i::Machine as RV32I, *};
+use riscv_sandbox::machine::{rv32imc::Machine as RV32I, *};
 use riscv_sandbox::isa::{Instruction, OpCode};
 
 use std::rc::Rc;
