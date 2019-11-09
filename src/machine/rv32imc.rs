@@ -304,6 +304,14 @@ impl Machine {
 
                 let v1 = self.get_register(i.get_rs1() as usize);
                 let v2 = self.get_register(i.get_rs2() as usize);
+                let uv1 = v1 as u32;
+                let uv2 = v2 as u32;
+                let v1_64 = v1 as i64;
+                let v2_64 = v2 as i64;
+                let uv1_64 = uv1 as u64;
+                let uv2_64 = uv2 as u64;
+
+                let allset = 0xFFFFFFFFu32 as i32;
 
                 to_mem.value = match i.get_funct7() {
                     0b0000000 => match i.get_funct3() {
@@ -317,8 +325,16 @@ impl Machine {
                         0b111 => v1 & v2,
                         _ => 0, // Cannot be here, because funct3 is on 3 bits
                     },
-                    0b0000001 => match i.get_funct3() {
-                        _ => 0, // TODO handle M extension (mul/div)
+                    0b0000001 => match i.get_funct3() { // M Extension
+                        0b000 => v1 * v2,
+                        0b001 => ((v1_64 * v2_64) >> 32) as i32,
+                        0b010 => ((v1_64 * (uv2_64 as i64)) >> 32) as i32,
+                        0b011 => ((uv1_64 * uv2_64) >> 32) as i32,
+                        0b100 => if v2 == 0 { allset } else { v1 / v2 }, // DIV
+                        0b101 => if v2 == 0 { allset } else { (uv1 / uv2) as i32 }, // DIVU
+                        0b110 => if v2 == 0 { v1 } else { v1 % v2 }, // REM
+                        0b111 => if v2 == 0 { v1 } else { (uv1 % uv2) as i32 }, // REMU
+                        _ => 0,
                     },
                     0b0100000 => match i.get_funct3() {
                         0b000 => v1.wrapping_sub(v2),
@@ -500,9 +516,25 @@ impl Machine {
     }
 
     pub fn do_fetch(&mut self, mem:&mut dyn Memory) {
-        if self.pc % 4 != 0 { self.raise_exception(false, 0, 0, self.pc); }
-        let i = Instruction(mem.get_32(self.pc as usize));
+        if self.pc % 2 != 0 { self.raise_exception(false, 0, 0, self.pc); }
+
+        let first = mem.get_16(self.pc as usize) as u32;
+
+        let ic = Instruction(first);
+
+        let i;
+        let advance : i32;
+        if ic.is_compressed() {
+            i = ic.uncompressed();
+            advance = 2
+        } else {
+            let second = mem.get_16((self.pc + 2) as usize) as u32;
+
+            i = Instruction((second << 16) | first);
+            advance = 4
+        }
+
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
-        self.pc += 4
+        self.pc += advance
     }
 }

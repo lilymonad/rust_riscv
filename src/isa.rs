@@ -268,6 +268,74 @@ impl Instruction {
         self.0 |= (imm  & 0x0FF000) as u32;
     }
     
+    pub fn get_c_func3(&self) -> u8 {
+        ((self.0 & 0xE000) >> 13) as u8
+    }
+
+    pub fn get_cmem_rs1(&self) -> u8 {
+        ((self.0 & 0x0380) >> 7) as u8
+    }
+
+    pub fn get_cl_rd(&self) -> u8 {
+        ((self.0 & 0x001E) >> 2) as u8
+    }
+
+    pub fn get_cmem_imm(&self) -> i32 {
+        let deuxsept = (self.0 >> 6) & 0b1;
+        let six = (self.0 >> 5) & 0b1;
+        (((self.0 & 0x1E00) >> 7) | (deuxsept << 2) | (six << 6)) as i32
+    }
+
+    pub fn get_cs_rs2(&self) -> u8 {
+        self.get_cl_rd()
+    }
+
+    pub fn get_c_nzr(&self) -> u8 {
+        (self.0 >> 7) as u8
+    }
+
+    pub fn get_c_nzimm(&self) -> i32 {
+        let num = ((self.0 & 0x1000) | ((self.0 & 0x3E) << 5)) as i16;
+        ((num << 3) >> 3) as i32
+    }
+
+    pub fn get_cj_imm(&self) -> i32 {
+        let troisun = (self.0 >> 2)  & 0b000000001110;
+        let quatre = (self.0 >> 9)   & 0b000000010000;
+        let cinq = (self.0 << 3)     & 0b000000100000;
+        let six = (self.0 >> 1)      & 0b000001000000;
+        let sept = (self.0 << 1)     & 0b000010000000;
+        let huitneuf = (self.0 >> 1) & 0b001100000000;
+        let dix = (self.0 << 2)      & 0b010000000000;
+        let onze = (self.0 >> 1)     & 0b100000000000;
+
+        (((troisun | quatre | cinq | six | sept | huitneuf | dix | onze) 
+         << 4) >> 4) as i32
+    }
+
+    pub fn get_cb_imm(&self) -> i32 {
+        let undeux = (self.0 >> 2)         & 0b000000000110;
+        let troisquatre = (self.0 >> 7)    & 0b000000011000;
+        let cinq = (self.0 << 3)           & 0b000000100000;
+        let sixsept = (self.0 << 1)        & 0b000011000000;
+        let huit    = (self.0 >> 4)        & 0b000100000000;
+        (((undeux | troisquatre | cinq | sixsept | huit)
+          << 7) >> 7) as i32
+    }
+
+    pub fn get_clwsp_imm(&self) -> i32 {
+        let deuxquatre = (self.0 >> 2) & 0b00011100;
+        let cinq = (self.0 >> 7)       & 0b00100000;
+        let sixsept = (self.0 << 4)    & 0b11000000;
+        (deuxquatre | cinq | sixsept) as i32
+    }
+
+    pub fn get_cswsp_imm(&self) -> i32 {
+        let deuxcinq = (self.0 >> 5) & 0b001111100;
+        let sixsept  = (self.0 >> 1) & 0b110000000;
+        (deuxcinq | sixsept) as i32
+    }
+
     pub fn get_type(&self) -> Type {
         self.get_opcode_enum().into()
     }
@@ -275,6 +343,7 @@ impl Instruction {
     pub fn get_opcode_enum(&self) -> OpCode {
         self.get_opcode().into()
     }
+
 
     pub fn be(&self) -> u32 {
         self.0
@@ -326,6 +395,111 @@ impl Instruction {
                 _ => "sys",
             } },
             OpCode::INVALID => "illegal",
+        }
+    }
+
+    pub fn is_compressed(&self) -> bool {
+        (self.get_opcode() & 0b11) != 0b11
+    }
+
+    // TODO: test it
+    pub fn uncompressed(&self) -> Instruction {
+        match self.get_opcode() & 0b11 {
+            0b10 => {
+                match self.get_c_func3() {
+                    0b000 => { Instruction::slli(self.get_c_nzr(), self.get_c_nzr(), self.get_c_nzimm()) },
+                    0b010 => { Instruction::lw(self.get_c_nzr(), 2, self.get_clwsp_imm()) },
+                    0b110 => { Instruction::sw(2, self.get_cs_rs2(), self.get_cswsp_imm()) },
+                    0b100 => {
+                        let code = self.get_c_nzimm();
+                        let rsrd = self.get_c_nzr();
+                        let rs2  = self.get_cs_rs2();
+                        if code & 0b100000 == 0{
+                            if code & 0b011111 == 0 { // 00
+                                Instruction::jalr(0, rsrd, 0)
+                            } else { // 01
+                                Instruction::addi(rsrd, rs2, 0)
+                            }
+                        } else {
+                            if code & 0b011111 == 0 { // 10
+                                Instruction::jalr(1, rsrd, 0)
+                            } else { // 11
+                                Instruction::add(rsrd, rsrd, rs2)
+                            }
+                        }
+                    },
+                    _ => Instruction::nop()
+                }
+            },
+            0b01 => {
+                match self.get_c_func3() {
+                    0b000 => {
+                        let rsrd = self.get_c_nzr();
+                        if rsrd == 0 {
+                            Instruction::nop()
+                        } else {
+                            let nzimm = self.get_c_nzimm();
+                            Instruction::addi(rsrd, rsrd, nzimm)
+                        }
+                    },
+                    0b001 => { Instruction::jal(1, self.get_cj_imm()) },
+                    0b101 => { Instruction::jal(0, self.get_cj_imm()) },
+                    0b010 => {
+                        let r = self.get_c_nzr();
+                        let imm = self.get_c_nzimm();
+                        Instruction::addi(r, 0, imm)
+                    },
+                    0b011 => {
+                        let r = self.get_c_nzr();
+                        let imm = self.get_c_nzimm() << 12;
+                        Instruction::lui(r, imm)
+                    },
+                    0b100 => {
+                        let code = (self.get_c_nzr() >> 3) & 0b11;
+                        let r = self.get_c_nzr() & 0b111;
+                        let nzimm = self.get_c_nzimm();
+                        let rs2 = self.get_cs_rs2();
+                        let alucode = (nzimm >> 2) & 0b11;
+                        match code {
+                            0b00 => { Instruction::srli(r, r, nzimm) },
+                            0b01 => { Instruction::srai(r, r, nzimm) },
+                            0b10 => { Instruction::andi(r, r, nzimm) },
+                            0b11 => {
+                                match alucode {
+                                    0b00 => Instruction::sub(r, r, rs2),
+                                    0b01 => Instruction::xor(r, r, rs2),
+                                    0b10 => Instruction::or(r, r, rs2),
+                                    0b11 => Instruction::and(r, r, rs2),
+                                    _ => Instruction::nop(),
+                                }
+                            },
+                            _ => Instruction::nop()
+                        }
+                    },
+                    0b110 => { Instruction::beq(self.get_cmem_rs1()+8, 0, self.get_cb_imm()) },
+                    0b111 => { Instruction::bne(self.get_cmem_rs1()+8, 0, self.get_cb_imm()) },
+                    _ => Instruction::nop()
+                }
+            },
+            0b00 => {
+                match self.get_c_func3() {
+                    0b010 => {
+                        let r1 = self.get_cmem_rs1();
+                        let rd = self.get_cl_rd();
+                        let imm = self.get_cmem_imm() as i32;
+                        Instruction::lw(rd + 8, r1 + 8, imm)
+                    },
+                    0b110 => {
+                        let r1 = self.get_cmem_rs1();
+                        let r2 = self.get_cs_rs2();
+                        let imm = self.get_cmem_imm();
+
+                        Instruction::sw(r1 + 8, r2 + 8, imm as i32)
+                    },
+                    _ => Instruction::nop()
+                }
+            },
+            _ => Instruction::nop(),
         }
     }
 }
