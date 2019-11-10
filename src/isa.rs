@@ -502,6 +502,35 @@ impl Instruction {
             _ => Instruction::nop(),
         }
     }
+
+    pub fn display_values(&self, rs:&[i32]) -> String {
+         match self.get_type() {
+            Type::R => {
+                format!("{} r{} = {}, {}", self.get_mnemonic(), self.get_rd(), rs[self.get_rs1() as usize], rs[self.get_rs2() as usize])
+            },
+            Type::I => {
+                let mnemonic = self.get_mnemonic();
+                let imm = 
+                    if mnemonic == "srli" || mnemonic == "srai"
+                        { self.get_rs2() as i32 }
+                    else
+                        { self.get_imm_i() };
+                format!("{} r{} = {}, {}", mnemonic, self.get_rd(), rs[self.get_rs1() as usize], imm)
+            },
+            Type::S => {
+                format!("{} {} @ {}+{}", self.get_mnemonic(), rs[self.get_rs2() as usize], rs[self.get_rs1() as usize], self.get_imm_s())
+            },
+            Type::B => {
+                format!("{} @pc+{} if {} $ {}", self.get_mnemonic(), self.get_imm_b(), rs[self.get_rs1() as usize], rs[self.get_rs2() as usize])
+            },
+            Type::U => {
+                format!("{} r{}, {}", self.get_mnemonic(), self.get_rd(), self.get_imm_u())
+            },
+            Type::J => {
+                format!("{} {}, ret r{}", self.get_mnemonic(), self.get_imm_j(), rs[self.get_rd() as usize])
+            },
+        }
+    }
 }
 
 impl fmt::Display for Instruction {

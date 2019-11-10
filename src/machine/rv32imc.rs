@@ -114,6 +114,8 @@ impl IntegerMachine for Machine {
 
     fn get_pc(&self) -> i32 { self.pc }
     fn set_pc(&mut self, value:i32) { self.pc = value }
+
+    fn finished(&self) -> bool { self.pc == 0 }
 }
 
 impl Machine {
@@ -248,10 +250,10 @@ impl Machine {
                 self.pc = match i.get_funct3() {
                     0b000 => if  v1 ==  v2 { tpc } else { ntpc }, // BEQ
                     0b001 => if  v1 !=  v2 { tpc } else { ntpc }, // BNE
-                    0b010 => if  v1 <   v2 { tpc } else { ntpc }, // BLT
-                    0b011 => if  v1 >=  v2 { tpc } else { ntpc }, // BGE
-                    0b100 => if uv1 <  uv2 { tpc } else { ntpc }, // BLTU
-                    0b101 => if uv1 >= uv2 { tpc } else { ntpc }, // BGEU
+                    0b100 => if  v1 <   v2 { tpc } else { ntpc }, // BLT
+                    0b101 => if  v1 >=  v2 { tpc } else { ntpc }, // BGE
+                    0b110 => if uv1 <  uv2 { tpc } else { ntpc }, // BLTU
+                    0b111 => if uv1 >= uv2 { tpc } else { ntpc }, // BGEU
                     _ => curr_pc,
                 };
 

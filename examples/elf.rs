@@ -2,7 +2,7 @@ extern crate elf as elflib;
 extern crate riscv_sandbox;
 
 use riscv_sandbox::elf::load_instructions;
-use riscv_sandbox::machine::{IntegerMachine, rv32pthread::Machine};
+use riscv_sandbox::machine::{IntegerMachine, rv32pthread::Machine, simtx::Machine as SIMTX};
 use riscv_sandbox::memory::Memory;
 use riscv_sandbox::isa::Instruction;
 
@@ -51,7 +51,7 @@ fn main() {
         rodata_i += 1
     }
 
-    let mut machine = Machine::new(calls);
+    let mut machine = SIMTX::new(4, 1, calls);//Machine::new(calls);
     println!("setting pc to 0x{:x}", pc as usize);
     machine.set_pc(pc);
     machine.set_i_register(1, 0);
@@ -61,10 +61,10 @@ fn main() {
         machine.cycle(&mut code);
         i += 1;
 
-        if i > 5 && machine.get_i_register(2) == 0 {
+        if machine.finished() {
             break;
         }
     }
 
-    println!("[SIM] program ended with value {}", machine.get_i_register(10))
+    println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register(10))
 }

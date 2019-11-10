@@ -27,6 +27,10 @@ impl Path {
             waiting_for_sync: waiting,
         }
     }
+
+    pub fn is_single(&self) -> bool {
+        self.execution_mask.count_ones() == 1
+    }
 }
 
 #[derive(Clone)]
@@ -50,10 +54,50 @@ impl Warp {
         }
     }
 
-    fn schedule_path(&mut self) {
+    pub fn get_single_core_id(&mut self) -> usize {
+        let mask = &self.paths[self.current_path].execution_mask;
+        for i in 0..self.cores.len() {
+            if mask[i] {
+                return i
+            }
+        }
+
+        panic!("A path is empty")
     }
 
-    fn for_each_core_alive(&mut self, f:&mut dyn FnMut(&mut Core) -> ()) {
+    pub fn schedule_path(&mut self) {
+        if self.paths.is_empty() { self.current_path = 0xFFFFFFFF }
+        else {
+            let old_pc = self.paths[self.current_path].fetch_pc;
+            let mut fusionned = HashMap::new();
+            let mut fusion = false;
+            for p in &self.paths {
+                if fusionned.contains_key(&p.fetch_pc) {
+                    let lhs = fusionned.get_mut(&p.fetch_pc).unwrap();
+                    *lhs |= p.execution_mask.clone();
+                    fusion = true;
+                } else {
+                    fusionned.insert(p.fetch_pc, p.execution_mask.clone());
+                }
+            }
+
+            if fusion {
+                let mut npaths = Vec::new();
+                for (k, v) in fusionned {
+                    npaths.push(Path::from_pc_mask(k, v));
+                }
+                self.current_path = 0;
+                if npaths[self.current_path].fetch_pc == old_pc {
+                    self.current_path = (self.current_path + 1) % npaths.len();
+                }
+                self.paths = npaths.clone();
+            } else {
+                self.current_path = (self.current_path + 1) % self.paths.len();
+            }
+        }
+    }
+
+    pub fn for_each_core_alive(&mut self, f:&mut dyn FnMut(&mut Core) -> ()) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
             if path.execution_mask[i] {
@@ -72,13 +116,18 @@ impl Warp {
     }
 
     pub fn execute(&mut self, mem:&mut dyn Memory) {
-        self.schedule_path();
+        if self.current_path == 0xFFFFFFFF { return }
+
+        let cid = self.get_single_core_id();
+        let regs = &self.cores[cid].registers;
         let path = &mut self.paths[self.current_path];
         let pc = path.fetch_pc;
+        let next_pc = pc.wrapping_add(4);
         let inst = Instruction(mem.get_32(pc as usize));
 
         let nth = self.cores.len();
 
+        let mut update_pc = true;
         match inst.get_opcode_enum() {
             OpCode::LUI => {
                 self.for_each_core_alive(&mut | core : &mut Core | {
@@ -87,10 +136,12 @@ impl Warp {
             },
             OpCode::AUIPC => { // direct jumps are always uniform
                 path.fetch_pc = pc.wrapping_add(inst.get_imm_u());
+                update_pc = false
             },
             OpCode::JAL => {
                 mem.set_32(inst.get_rd() as usize, pc.wrapping_add(4) as u32);
                 path.fetch_pc = pc.wrapping_add(inst.get_imm_j());
+                update_pc = false
             },
             OpCode::JALR => { // indirect jump can be divergent multiple times
                 mem.set_32(inst.get_rd() as usize, pc.wrapping_add(4) as u32);
@@ -109,7 +160,7 @@ impl Warp {
                             let mut bv = BitVec::new();
                             bv.resize(nth, false);
                             bv.set(i, true);
-                            nph.insert(new_pc, bv).unwrap();
+                            nph.insert(new_pc, bv);
                         }
                     }
                 }
@@ -125,6 +176,8 @@ impl Warp {
                         self.paths.push(Path::from_pc_mask(pc, mask));
                     }
                 }
+
+                update_pc = false
             },
             OpCode::BRANCH => { // conditional branch
                 let  tpc = pc.wrapping_add(inst.get_imm_b());
@@ -148,12 +201,12 @@ impl Warp {
                         let uv2 = v2 as u32;
 
                         let take = match inst.get_funct3() {
-                            0b000 => v1 ==  v2, // BEQ
-                            0b001 => v1 !=  v2 , // BNE
-                            0b010 => v1 <   v2 , // BLT
-                            0b011 => v1 >=  v2 , // BGE
-                            0b100 => uv1 <  uv2 , // BLTU
-                            0b101 => uv1 >= uv2 , // BGEU
+                            0b000 => {v1 ==  v2}, // BEQ
+                            0b001 => {v1 !=  v2 }, // BNE
+                            0b100 => {v1 <   v2 }, // BLT
+                            0b101 => { v1 >=  v2 }, // BGE
+                            0b110 =>{ uv1 <  uv2 }, // BLTU
+                            0b111 =>{ uv1 >= uv2 }, // BGEU
                             _ => false,
                         };
 
@@ -172,6 +225,8 @@ impl Warp {
                     self.paths.push(Path::from_pc_mask(tpc, taken_mask));
                     self.paths.push(Path::from_pc_mask(ntpc, not_taken_mask));
                 }
+
+                update_pc = false
             },
             OpCode::LOAD => {
                 let width = inst.get_funct3();
@@ -183,7 +238,7 @@ impl Warp {
                             0 => mem.get_8(addr) as i32,
                             1 => mem.get_16(addr) as i32,
                             2 => mem.get_32(addr) as i32,
-                            _ => 0, // ERROR
+                            _ => panic!("LOAD: bad word width"), // ERROR
                         };
                 });
             },
@@ -191,13 +246,13 @@ impl Warp {
                 let width = inst.get_funct3();
                 self.for_each_core_alive(&mut |core| {
                     let base = core.registers[inst.get_rs1() as usize] as usize;
-                    let addr = base.wrapping_add(inst.get_imm_i() as usize);
+                    let addr = base.wrapping_add(inst.get_imm_s() as usize);
                     let src = core.registers[inst.get_rs2() as usize];
                     match width {
                         0 => mem.set_8(addr, src as u8),
                         1 => mem.set_16(addr, src as u16),
                         2 => mem.set_32(addr, src as u32),
-                        _ => {}, // ERROR
+                        _ => panic!("STORE: Bad word width"), // ERROR
                     }
                 });
             },
@@ -257,45 +312,145 @@ impl Warp {
             },
             _ => {}
         }
+
+        if update_pc {
+            self.paths[self.current_path].fetch_pc = next_pc
+        }
     }
 }
 
 pub struct Machine {
     warps:Vec<Warp>,
+    plt_addresses:HashMap<i32, String>,
+    idle_threads:Vec<usize>,
+    finished:BitVec,
 }
 
 impl Machine {
-    pub fn new(tpw:usize, nb_warps:usize) -> Machine {
+    pub fn new(tpw:usize, nb_warps:usize, plt:HashMap<i32, String>) -> Machine {
         let mut ws = Vec::new();
         ws.resize(nb_warps, Warp::new(tpw));
+
+        let mut idle = Vec::new();
+        for i in (0..tpw*nb_warps).rev() {
+            idle.push(i)
+        }
+
+        let mut fin = BitVec::new();
+        fin.resize(tpw*nb_warps, false);
+
         Machine {
             warps: ws.clone(),
+            plt_addresses:plt,
+            idle_threads:idle.clone(),
+            finished:fin,
         }
+    }
+
+    fn pop_first_idle(&mut self) -> usize {
+        self.idle_threads.pop().expect("No more threads")
     }
 }
 
 impl IntegerMachine for Machine {
     type IntegerType = i32;
 
-
     fn cycle(&mut self, mem:&mut dyn Memory) {
-        for warp in &mut self.warps {
-            warp.execute(mem)
+        let tpw = self.warps[0].cores.len();
+
+        for wid in 0..self.warps.len() {
+            self.warps[wid].schedule_path();
+            let pathid = self.warps[wid].current_path;
+            if self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
+
+            let pc = self.warps[wid].paths[pathid].fetch_pc;
+            let i = Instruction(mem.get_32(pc as usize));
+            let address = pc.wrapping_add(i.get_imm_j());
+
+            if i.get_opcode_enum() == OpCode::JAL {
+                if let Some(func_name) = self.plt_addresses.get(&address) {
+
+                    
+                    if func_name.contains("pthread_create") {
+
+                        assert!(self.warps[wid].paths[pathid].is_single(),
+                            "pthread_create must be called by only 1 thread");
+
+                        // allocate a new thread (get its id)
+                        let tid = self.pop_first_idle();
+                        let w = tid / tpw; let t = tid % tpw;
+
+                        let cid = self.warps[wid].get_single_core_id();
+                        // write in memory the tid
+                        mem.set_32(self.warps[wid].cores[cid].registers[10] as usize, tid as u32);
+
+                        // setup allocated core's register file
+                        let mut regs = [0;32]; let stackoff = (-1024) * tid as i32;
+                        regs[2] = stackoff;
+                        regs[8] = stackoff;
+                        self.warps[w].cores[t].registers = regs;
+
+                        // setup a new path with only allocated thread inside
+                        let npc = self.warps[wid].cores[cid].registers[12];
+                        let mut m = BitVec::new(); m.resize(tpw, false);
+                        m.set(t, true);
+
+                        self.warps[wid].paths.push(Path::from_pc_mask(npc, m));
+
+                        // return 0 and advance current path
+                        self.warps[wid].cores[cid].registers[10] = 0;
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    } else if func_name.contains("pthread_join") {
+                        let cid = self.warps[wid].get_single_core_id();
+                        let to_wait = self.warps[wid].cores[cid].registers[10];
+                        if self.finished[to_wait as usize] {
+                            self.warps[wid].paths[pathid].fetch_pc += 4;
+                        }
+                    } else if func_name.contains("puts") {
+                        let cid = self.warps[wid].get_single_core_id();
+                        println!("Core #{} [puts]", cid+wid*tpw);
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    }
+                } else {
+                    self.warps[wid].execute(mem)
+                }
+            } else {
+                self.warps[wid].execute(mem)
+            }
+
+            for i in 0..tpw {
+                if self.warps[wid].paths[pathid].execution_mask[i] &&
+                    self.warps[wid].cores[i].registers[2] == ((i as i32) *(-1024)) {
+                        self.finished.set(i, true);
+                }
+            }
         }
     }
 
-    fn get_i_register(&self, _id:usize) -> i32 {
-        0
+    fn get_i_register(&self, id:usize) -> i32 {
+        return self.warps[0].cores[0].registers[id]
     }
 
     fn set_i_register(&mut self, _id:usize, _value:i32) {
     }
 
     fn get_pc(&self) -> i32 {
-        0
+        for path in &self.warps[0].paths {
+            if path.execution_mask[0] {
+                return path.fetch_pc
+            }
+        }
+
+        panic!("No path in warp 0")
     }
 
-    fn set_pc(&mut self, _value:i32) {
+    fn set_pc(&mut self, value:i32) {
+        if self.warps[0].paths.is_empty() {
+            let th = self.pop_first_idle();
+            let mut m = BitVec::new(); m.resize(self.warps[0].cores.len(), false);
+            m.set(th, true);
+            self.warps[0].paths.push(Path::from_pc_mask(value, m));
+        }
     }
 
     fn get_privilege(&self) -> u8 {
@@ -310,5 +465,16 @@ impl IntegerMachine for Machine {
     }
 
     fn set_csr_field(&mut self, _field:CsrField, _value:i32) {
+    }
+
+    fn finished(&self) -> bool {
+        for warp in &self.warps {
+            for path in &warp.paths {
+                if path.fetch_pc != 0 {
+                    return false
+                }
+            }
+        }
+        true
     }
 }

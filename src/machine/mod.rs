@@ -52,6 +52,9 @@ pub trait IntegerMachine {
     /// respectively to `Machine`, `Supervisor`, and `User` privilege.
     fn set_privilege(&mut self, privilege : u8);
 
+    /// Tells if the machine has finished
+    fn finished(&self) -> bool;
+
     /// This function is a helper function to access CSR with CSRRx instructions.
     /// Many CSR fields are placed in the same CSR , but with different 
     /// access privileges. The best example is `mstatus` CSR which contains many

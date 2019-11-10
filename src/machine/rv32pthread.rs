@@ -171,5 +171,12 @@ impl IntegerMachine for Machine {
 
     fn get_pc(&self) -> i32 { self.cores[self.current_core].get_pc() }
     fn set_pc(&mut self, value:i32) { self.cores[self.current_core].set_pc(value) }
+
+    fn finished(&self) -> bool {
+        for core in &self.cores {
+            if !core.finished() { return false }
+        }
+        true
+    }
 }
 
