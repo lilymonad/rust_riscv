@@ -5,11 +5,16 @@ use bitvec::vec::BitVec;
 
 use std::collections::HashMap;
 
+/// Defines the state of a single hardware thread.
 #[derive(Clone)]
 struct Core {
     pub registers: [ i32; 32 ],
 }
 
+/// Defines a SIMT Path. As threads are grouped in `Warp`s executed in lockstep,
+/// we handle divergence by remembering where all threads are with a
+/// `(fetch_pc, execution_mask)` tuple. Before fetching instructions, we chose
+/// a `Path` to advance.
 #[derive(Clone)]
 struct Path {
     pub fetch_pc : i32,
@@ -33,6 +38,8 @@ impl Path {
     }
 }
 
+/// Defines a hardware warp (a group of threads) which all execute instructions
+/// in an SIMD fasion.
 #[derive(Clone)]
 struct Warp {
     pub cores: Vec<Core>,
@@ -319,6 +326,8 @@ impl Warp {
     }
 }
 
+/// The SIMT-X machine. To handle `pthread` or `omp` system calls, we detect them
+/// using plt information, and emulate them.
 pub struct Machine {
     warps:Vec<Warp>,
     plt_addresses:HashMap<i32, String>,
