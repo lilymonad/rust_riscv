@@ -661,117 +661,520 @@ impl Into<u8> for OpCode {
 /// adds some helper functions to easily get privilege the R/W permissions and
 /// privilege level of the indexed register.
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
-pub struct CsrId(pub u16);
+pub enum CsrId {
+    USTATUS = 0x000,
+    UIE = 0x004,
+    UTVEC = 0x005,
+    USCRATCH = 0x040,
+    UEPC = 0x041,
+    UCAUSE = 0x042,
+    UTVAL = 0x043,
+    UIP = 0x044,
+
+    FFLAGS = 0x001,
+    FRM = 0x002,
+    FCSR = 0x003,
+
+    CYCLE = 0xC00,
+    TIME = 0xC01,
+    INSTRET = 0xC02,
+
+    HPMCOUNTER03 = 0xC03,
+    HPMCOUNTER04 = 0xC04,
+    HPMCOUNTER05 = 0xC05,
+    HPMCOUNTER06 = 0xC06,
+    HPMCOUNTER07 = 0xC07,
+    HPMCOUNTER08 = 0xC08,
+    HPMCOUNTER09 = 0xC09,
+    HPMCOUNTER10 = 0xC0A,
+    HPMCOUNTER11 = 0xC0B,
+    HPMCOUNTER12 = 0xC0C,
+    HPMCOUNTER13 = 0xC0D,
+    HPMCOUNTER14 = 0xC0E,
+    HPMCOUNTER15 = 0xC0F,
+    HPMCOUNTER16 = 0xC10,
+    HPMCOUNTER17 = 0xC11,
+    HPMCOUNTER18 = 0xC12,
+    HPMCOUNTER19 = 0xC13,
+    HPMCOUNTER20 = 0xC14,
+    HPMCOUNTER21 = 0xC15,
+    HPMCOUNTER22 = 0xC16,
+    HPMCOUNTER23 = 0xC17,
+    HPMCOUNTER24 = 0xC18,
+    HPMCOUNTER25 = 0xC19,
+    HPMCOUNTER26 = 0xC1A,
+    HPMCOUNTER27 = 0xC1B,
+    HPMCOUNTER28 = 0xC1C,
+    HPMCOUNTER29 = 0xC1D,
+    HPMCOUNTER30 = 0xC1E,
+    HPMCOUNTER31 = 0xC1F,
+
+    CYCLEH = 0xC80,
+    TIMEH = 0xC81,
+    INSTRETH = 0xC82,
+
+    HPMCOUNTER03H = 0xC83,
+    HPMCOUNTER04H = 0xC84,
+    HPMCOUNTER05H = 0xC85,
+    HPMCOUNTER06H = 0xC86,
+    HPMCOUNTER07H = 0xC87,
+    HPMCOUNTER08H = 0xC88,
+    HPMCOUNTER09H = 0xC89,
+    HPMCOUNTER10H = 0xC8A,
+    HPMCOUNTER11H = 0xC8B,
+    HPMCOUNTER12H = 0xC8C,
+    HPMCOUNTER13H = 0xC8D,
+    HPMCOUNTER14H = 0xC8E,
+    HPMCOUNTER15H = 0xC8F,
+    HPMCOUNTER16H = 0xC90,
+    HPMCOUNTER17H = 0xC91,
+    HPMCOUNTER18H = 0xC92,
+    HPMCOUNTER19H = 0xC93,
+    HPMCOUNTER20H = 0xC94,
+    HPMCOUNTER21H = 0xC95,
+    HPMCOUNTER22H = 0xC96,
+    HPMCOUNTER23H = 0xC97,
+    HPMCOUNTER24H = 0xC98,
+    HPMCOUNTER25H = 0xC99,
+    HPMCOUNTER26H = 0xC9A,
+    HPMCOUNTER27H = 0xC9B,
+    HPMCOUNTER28H = 0xC9C,
+    HPMCOUNTER29H = 0xC9D,
+    HPMCOUNTER30H = 0xC9E,
+    HPMCOUNTER31H = 0xC9F,
+
+    SSTATUS = 0x100,
+    SEDELEG = 0x102,
+    SIDELEG = 0x103,
+    SIE = 0x104,
+    STVEC = 0x105,
+    SCOUNTEREN = 0x106,
+
+    SSCRATCH = 0x140,
+    SEPC = 0x141,
+    SCAUSE = 0x142,
+    STVAL = 0x143,
+    SIP = 0x144,
+
+    SATP = 0x180,
+
+    HSTATUS = 0xA00,
+    HEDELEG = 0xA02,
+    HIDELEG = 0xA03,
+
+    HGATP = 0xA80,
+
+    BSSTATUS = 0x200,
+    BSIE = 0x204,
+    BSTVEC = 0x205,
+    BSSCRATCH = 0x240,
+    BSEPC = 0x241,
+    BSCAUSE = 0x242,
+    BSTVAL = 0x243,
+    BSIP = 0x244,
+    BSATP = 0x280,
+
+    MVENDORID = 0xF11,
+    MARCHID = 0xF12,
+    MIMPID = 0xF13,
+    MHARTID = 0xF14,
+
+    MSTATUS = 0x300,
+    MISA = 0x301,
+    MEDELEG = 0x302,
+    MIDELEG = 0x303,
+    MIE = 0x304,
+    MTVEC = 0x305,
+    MCOUNTEREN = 0x306,
+
+    MSCRATCH = 0x340,
+    MEPC = 0x341,
+    MCAUSE = 0x342,
+    MTVAL = 0x343,
+    MIP = 0x344,
+
+    PMPCFG0 = 0x3A0,
+    PMPCFG1 = 0x3A1,
+    PMPCFG2 = 0x3A2,
+    PMPCFG3 = 0x3A3,
+
+    PMPADDR00 = 0x3B0,
+    PMPADDR01 = 0x3B1,
+    PMPADDR02 = 0x3B2,
+    PMPADDR03 = 0x3B3,
+    PMPADDR04 = 0x3B4,
+    PMPADDR05 = 0x3B5,
+    PMPADDR06 = 0x3B6,
+    PMPADDR07 = 0x3B7,
+    PMPADDR08 = 0x3B8,
+    PMPADDR09 = 0x3B9,
+    PMPADDR10 = 0x3BA,
+    PMPADDR11 = 0x3BB,
+    PMPADDR12 = 0x3BC,
+    PMPADDR13 = 0x3BD,
+    PMPADDR14 = 0x3BE,
+    PMPADDR15 = 0x3BF,
+
+    MCYCLE = 0xB00,
+    MINSTRET = 0xB02,
+
+    MHMPCOUNTER03 = 0xB03,
+    MHMPCOUNTER04 = 0xB04,
+    MHMPCOUNTER05 = 0xB05,
+    MHMPCOUNTER06 = 0xB06,
+    MHMPCOUNTER07 = 0xB07,
+    MHMPCOUNTER08 = 0xB08,
+    MHMPCOUNTER09 = 0xB09,
+    MHMPCOUNTER10 = 0xB0A,
+    MHMPCOUNTER11 = 0xB0B,
+    MHMPCOUNTER12 = 0xB0C,
+    MHMPCOUNTER13 = 0xB0D,
+    MHMPCOUNTER14 = 0xB0E,
+    MHMPCOUNTER15 = 0xB0F,
+    MHMPCOUNTER16 = 0xB10,
+    MHMPCOUNTER17 = 0xB11,
+    MHMPCOUNTER18 = 0xB12,
+    MHMPCOUNTER19 = 0xB13,
+    MHMPCOUNTER20 = 0xB14,
+    MHMPCOUNTER21 = 0xB15,
+    MHMPCOUNTER22 = 0xB16,
+    MHMPCOUNTER23 = 0xB17,
+    MHMPCOUNTER24 = 0xB18,
+    MHMPCOUNTER25 = 0xB19,
+    MHMPCOUNTER26 = 0xB1A,
+    MHMPCOUNTER27 = 0xB1B,
+    MHMPCOUNTER28 = 0xB1C,
+    MHMPCOUNTER29 = 0xB1D,
+    MHMPCOUNTER30 = 0xB1E,
+    MHMPCOUNTER31 = 0xB1F,
+
+    MCYCLEH = 0xB80,
+    MINSTRETH = 0xB82,
+
+    MHMPCOUNTER03H = 0xB83,
+    MHMPCOUNTER04H = 0xB84,
+    MHMPCOUNTER05H = 0xB85,
+    MHMPCOUNTER06H = 0xB86,
+    MHMPCOUNTER07H = 0xB87,
+    MHMPCOUNTER08H = 0xB88,
+    MHMPCOUNTER09H = 0xB89,
+    MHMPCOUNTER10H = 0xB8A,
+    MHMPCOUNTER11H = 0xB8B,
+    MHMPCOUNTER12H = 0xB8C,
+    MHMPCOUNTER13H = 0xB8D,
+    MHMPCOUNTER14H = 0xB8E,
+    MHMPCOUNTER15H = 0xB8F,
+    MHMPCOUNTER16H = 0xB90,
+    MHMPCOUNTER17H = 0xB91,
+    MHMPCOUNTER18H = 0xB92,
+    MHMPCOUNTER19H = 0xB93,
+    MHMPCOUNTER20H = 0xB94,
+    MHMPCOUNTER21H = 0xB95,
+    MHMPCOUNTER22H = 0xB96,
+    MHMPCOUNTER23H = 0xB97,
+    MHMPCOUNTER24H = 0xB98,
+    MHMPCOUNTER25H = 0xB99,
+    MHMPCOUNTER26H = 0xB9A,
+    MHMPCOUNTER27H = 0xB9B,
+    MHMPCOUNTER28H = 0xB9C,
+    MHMPCOUNTER29H = 0xB9D,
+    MHMPCOUNTER30H = 0xB9E,
+    MHMPCOUNTER31H = 0xB9F,
+
+    MCOUNTINHIBIT = 0x320,
+
+    MHPEVENT03 = 0x323,
+    MHPEVENT04 = 0x324,
+    MHPEVENT05 = 0x325,
+    MHPEVENT06 = 0x326,
+    MHPEVENT07 = 0x327,
+    MHPEVENT08 = 0x328,
+    MHPEVENT09 = 0x329,
+    MHPEVENT10 = 0x32a,
+    MHPEVENT11 = 0x32b,
+    MHPEVENT12 = 0x32c,
+    MHPEVENT13 = 0x32d,
+    MHPEVENT14 = 0x32e,
+    MHPEVENT15 = 0x32f,
+    MHPEVENT16 = 0x330,
+    MHPEVENT17 = 0x331,
+    MHPEVENT18 = 0x332,
+    MHPEVENT19 = 0x333,
+    MHPEVENT20 = 0x334,
+    MHPEVENT21 = 0x335,
+    MHPEVENT22 = 0x336,
+    MHPEVENT23 = 0x337,
+    MHPEVENT24 = 0x338,
+    MHPEVENT25 = 0x339,
+    MHPEVENT26 = 0x33a,
+    MHPEVENT27 = 0x33b,
+    MHPEVENT28 = 0x33c,
+    MHPEVENT29 = 0x33d,
+    MHPEVENT30 = 0x33e,
+    MHPEVENT31 = 0x33f,
+
+    TSELECT = 0x7A0,
+    TDATA1 = 0x7A1,
+    TDATA2 = 0x7A2,
+    TDATA3 = 0x7A3,
+
+    DCSR = 0x7B0,
+    DPC = 0x7B1,
+    DSCRATCH0 = 0x7B2,
+    DSCRATCH1 = 0x7B3,
+}
 
 impl CsrId {
-    pub const USTATUS : CsrId = CsrId(0x000);
-    pub const UIE : CsrId = CsrId(0x004);
-    pub const UTVEC : CsrId = CsrId(0x005);
-    pub const USCRATCH : CsrId = CsrId(0x040);
-    pub const UEPC : CsrId = CsrId(0x041);
-    pub const UCAUSE : CsrId = CsrId(0x042);
-    pub const UTVAL : CsrId = CsrId(0x043);
-    pub const UIP : CsrId = CsrId(0x044);
-
-    pub const FFLAGS : CsrId = CsrId(0x001);
-    pub const FRM : CsrId = CsrId(0x002);
-    pub const FCSR : CsrId = CsrId(0x003);
-
-    pub const CYCLE : CsrId = CsrId(0xC00);
-    pub const TIME : CsrId = CsrId(0xC01);
-    pub const INSTRET : CsrId = CsrId(0xC02);
-
-    pub fn hmpcounter(i:u16) -> CsrId { CsrId(0xC00 + i) }
-
-    pub const CYCLEH : CsrId = CsrId(0xC80);
-    pub const TIMEH : CsrId = CsrId(0xC81);
-    pub const INSTRETH : CsrId = CsrId(0xC82);
-
-    pub fn hmpcounter_h(i:u16) -> CsrId { CsrId(0xC80 + i) }
-
-    pub const SSTATUS : CsrId = CsrId(0x100);
-    pub const SEDELEG : CsrId = CsrId(0x102);
-    pub const SIDELEG : CsrId = CsrId(0x103);
-    pub const SIE : CsrId = CsrId(0x104);
-    pub const STVEC : CsrId = CsrId(0x105);
-    pub const SCOUNTEREN : CsrId = CsrId(0x106);
-
-    pub const SSCRATCH : CsrId = CsrId(0x140);
-    pub const SEPC : CsrId = CsrId(0x141);
-    pub const SCAUSE : CsrId = CsrId(0x142);
-    pub const STVAL : CsrId = CsrId(0x143);
-    pub const SIP : CsrId = CsrId(0x144);
-
-    pub const SATP : CsrId = CsrId(0x180);
-
-    pub const HSTATUS : CsrId = CsrId(0xA00);
-    pub const HEDELEG : CsrId = CsrId(0xA02);
-    pub const HIDELEG : CsrId = CsrId(0xA03);
-
-    pub const HGATP : CsrId = CsrId(0xA80);
-
-    pub const BSSTATUS : CsrId = CsrId(0x200);
-    pub const BSIE : CsrId = CsrId(0x204);
-    pub const BSTVEC : CsrId = CsrId(0x205);
-    pub const BSSCRATCH : CsrId = CsrId(0x240);
-    pub const BSEPC : CsrId = CsrId(0x241);
-    pub const BSCAUSE : CsrId = CsrId(0x242);
-    pub const BSTVAL : CsrId = CsrId(0x243);
-    pub const BSIP : CsrId = CsrId(0x244);
-    pub const BSATP : CsrId = CsrId(0x280);
-
-    pub const MVENDORID : CsrId = CsrId(0xF11);
-    pub const MARCHID : CsrId = CsrId(0xF12);
-    pub const MIMPID : CsrId = CsrId(0xF13);
-    pub const MHARTID : CsrId = CsrId(0xF14);
-
-    pub const MSTATUS : CsrId = CsrId(0x300);
-    pub const MISA : CsrId = CsrId(0x301);
-    pub const MEDELEG : CsrId = CsrId(0x302);
-    pub const MIDELEG : CsrId = CsrId(0x303);
-    pub const MIE : CsrId = CsrId(0x304);
-    pub const MTVEC : CsrId = CsrId(0x305);
-    pub const MCOUNTEREN : CsrId = CsrId(0x306);
-
-    pub const MSCRATCH : CsrId = CsrId(0x340);
-    pub const MEPC : CsrId = CsrId(0x341);
-    pub const MCAUSE : CsrId = CsrId(0x342);
-    pub const MTVAL : CsrId = CsrId(0x343);
-    pub const MIP : CsrId = CsrId(0x344);
-
-    pub fn pmpcfg(i:u16) -> CsrId { CsrId(0x3A0 + i) }
-    pub fn pmpaddr(i:u16) -> CsrId { CsrId(0x3B0 + i) }
-
-    pub const MCYCLE : CsrId = CsrId(0xB00);
-    pub const MINSTRET : CsrId = CsrId(0xB02);
-
-    pub fn mhmpcounter(i:u16) -> CsrId { CsrId(0xB00 + i) }
-
-    pub const MCYCLEH : CsrId = CsrId(0xB80);
-    pub const MINSTRETH : CsrId = CsrId(0xB82);
-
-    pub fn mhmpcounter_h(i:u16) -> CsrId { CsrId(0xB80 + i) }
-
-    pub const MCOUNTINHIBIT : CsrId = CsrId(0x320);
-
-    pub fn mhpevent(i:u16) -> CsrId { CsrId(0x323 + i) }
-
-    pub const TSELECT : CsrId = CsrId(0x7A0);
-    pub const TDATA1 : CsrId = CsrId(0x7A1);
-    pub const TDATA2 : CsrId = CsrId(0x7A2);
-    pub const TDATA3 : CsrId = CsrId(0x7A3);
-
-    pub const DCSR : CsrId = CsrId(0x7B0);
-    pub const DPC : CsrId = CsrId(0x7B1);
-    pub const DSCRATCH0 : CsrId = CsrId(0x7B2);
-    pub const DSCRATCH1 : CsrId = CsrId(0x7B3);
-
     pub fn mode(&self) -> u8 {
-        (self.0 >> 10) as u8
+        ((*self as u16) >> 10) as u8
     }
 
     pub fn level(&self) -> u8 {
-        ((self.0 >> 8) & 0b11) as u8
+        (((*self as u16) >> 8) & 0b11) as u8
+    }
+}
+
+impl From<u16> for CsrId {
+    fn from(value:u16) -> CsrId {
+        match value {
+            0x000 => CsrId::USTATUS ,
+            0x004 => CsrId::UIE ,
+            0x005 => CsrId::UTVEC ,
+            0x040 => CsrId::USCRATCH ,
+            0x041 => CsrId::UEPC ,
+            0x042 => CsrId::UCAUSE ,
+            0x043 => CsrId::UTVAL ,
+            0x044 => CsrId::UIP ,
+            0x001 => CsrId::FFLAGS ,
+            0x002 => CsrId::FRM ,
+            0x003 => CsrId::FCSR ,
+            0xC00 => CsrId::CYCLE ,
+            0xC01 => CsrId::TIME ,
+            0xC02 => CsrId::INSTRET ,
+            0xC03 => CsrId::HPMCOUNTER03 ,
+            0xC04 => CsrId::HPMCOUNTER04 ,
+            0xC05 => CsrId::HPMCOUNTER05 ,
+            0xC06 => CsrId::HPMCOUNTER06 ,
+            0xC07 => CsrId::HPMCOUNTER07 ,
+            0xC08 => CsrId::HPMCOUNTER08 ,
+            0xC09 => CsrId::HPMCOUNTER09 ,
+            0xC0A => CsrId::HPMCOUNTER10 ,
+            0xC0B => CsrId::HPMCOUNTER11 ,
+            0xC0C => CsrId::HPMCOUNTER12 ,
+            0xC0D => CsrId::HPMCOUNTER13 ,
+            0xC0E => CsrId::HPMCOUNTER14 ,
+            0xC0F => CsrId::HPMCOUNTER15 ,
+            0xC10 => CsrId::HPMCOUNTER16 ,
+            0xC11 => CsrId::HPMCOUNTER17 ,
+            0xC12 => CsrId::HPMCOUNTER18 ,
+            0xC13 => CsrId::HPMCOUNTER19 ,
+            0xC14 => CsrId::HPMCOUNTER20 ,
+            0xC15 => CsrId::HPMCOUNTER21 ,
+            0xC16 => CsrId::HPMCOUNTER22 ,
+            0xC17 => CsrId::HPMCOUNTER23 ,
+            0xC18 => CsrId::HPMCOUNTER24 ,
+            0xC19 => CsrId::HPMCOUNTER25 ,
+            0xC1A => CsrId::HPMCOUNTER26 ,
+            0xC1B => CsrId::HPMCOUNTER27 ,
+            0xC1C => CsrId::HPMCOUNTER28 ,
+            0xC1D => CsrId::HPMCOUNTER29 ,
+            0xC1E => CsrId::HPMCOUNTER30 ,
+            0xC1F => CsrId::HPMCOUNTER31 ,
+            0xC80 => CsrId::CYCLEH ,
+            0xC81 => CsrId::TIMEH ,
+            0xC82 => CsrId::INSTRETH ,
+            0xC83 => CsrId::HPMCOUNTER03H ,
+            0xC84 => CsrId::HPMCOUNTER04H ,
+            0xC85 => CsrId::HPMCOUNTER05H ,
+            0xC86 => CsrId::HPMCOUNTER06H ,
+            0xC87 => CsrId::HPMCOUNTER07H ,
+            0xC88 => CsrId::HPMCOUNTER08H ,
+            0xC89 => CsrId::HPMCOUNTER09H ,
+            0xC8A => CsrId::HPMCOUNTER10H ,
+            0xC8B => CsrId::HPMCOUNTER11H ,
+            0xC8C => CsrId::HPMCOUNTER12H ,
+            0xC8D => CsrId::HPMCOUNTER13H ,
+            0xC8E => CsrId::HPMCOUNTER14H ,
+            0xC8F => CsrId::HPMCOUNTER15H ,
+            0xC90 => CsrId::HPMCOUNTER16H ,
+            0xC91 => CsrId::HPMCOUNTER17H ,
+            0xC92 => CsrId::HPMCOUNTER18H ,
+            0xC93 => CsrId::HPMCOUNTER19H ,
+            0xC94 => CsrId::HPMCOUNTER20H ,
+            0xC95 => CsrId::HPMCOUNTER21H ,
+            0xC96 => CsrId::HPMCOUNTER22H ,
+            0xC97 => CsrId::HPMCOUNTER23H ,
+            0xC98 => CsrId::HPMCOUNTER24H ,
+            0xC99 => CsrId::HPMCOUNTER25H ,
+            0xC9A => CsrId::HPMCOUNTER26H ,
+            0xC9B => CsrId::HPMCOUNTER27H ,
+            0xC9C => CsrId::HPMCOUNTER28H ,
+            0xC9D => CsrId::HPMCOUNTER29H ,
+            0xC9E => CsrId::HPMCOUNTER30H ,
+            0xC9F => CsrId::HPMCOUNTER31H ,
+            0x100 => CsrId::SSTATUS ,
+            0x102 => CsrId::SEDELEG ,
+            0x103 => CsrId::SIDELEG ,
+            0x104 => CsrId::SIE ,
+            0x105 => CsrId::STVEC ,
+            0x106 => CsrId::SCOUNTEREN ,
+            0x140 => CsrId::SSCRATCH ,
+            0x141 => CsrId::SEPC ,
+            0x142 => CsrId::SCAUSE ,
+            0x143 => CsrId::STVAL ,
+            0x144 => CsrId::SIP ,
+            0x180 => CsrId::SATP ,
+            0xA00 => CsrId::HSTATUS ,
+            0xA02 => CsrId::HEDELEG ,
+            0xA03 => CsrId::HIDELEG ,
+            0xA80 => CsrId::HGATP ,
+            0x200 => CsrId::BSSTATUS ,
+            0x204 => CsrId::BSIE ,
+            0x205 => CsrId::BSTVEC ,
+            0x240 => CsrId::BSSCRATCH ,
+            0x241 => CsrId::BSEPC ,
+            0x242 => CsrId::BSCAUSE ,
+            0x243 => CsrId::BSTVAL ,
+            0x244 => CsrId::BSIP ,
+            0x280 => CsrId::BSATP ,
+            0xF11 => CsrId::MVENDORID ,
+            0xF12 => CsrId::MARCHID ,
+            0xF13 => CsrId::MIMPID ,
+            0xF14 => CsrId::MHARTID ,
+            0x300 => CsrId::MSTATUS ,
+            0x301 => CsrId::MISA ,
+            0x302 => CsrId::MEDELEG ,
+            0x303 => CsrId::MIDELEG ,
+            0x304 => CsrId::MIE ,
+            0x305 => CsrId::MTVEC ,
+            0x306 => CsrId::MCOUNTEREN ,
+            0x340 => CsrId::MSCRATCH ,
+            0x341 => CsrId::MEPC ,
+            0x342 => CsrId::MCAUSE ,
+            0x343 => CsrId::MTVAL ,
+            0x344 => CsrId::MIP ,
+            0x3A0 => CsrId::PMPCFG0 ,
+            0x3A1 => CsrId::PMPCFG1 ,
+            0x3A2 => CsrId::PMPCFG2 ,
+            0x3A3 => CsrId::PMPCFG3 ,
+            0x3B0 => CsrId::PMPADDR00 ,
+            0x3B1 => CsrId::PMPADDR01 ,
+            0x3B2 => CsrId::PMPADDR02 ,
+            0x3B3 => CsrId::PMPADDR03 ,
+            0x3B4 => CsrId::PMPADDR04 ,
+            0x3B5 => CsrId::PMPADDR05 ,
+            0x3B6 => CsrId::PMPADDR06 ,
+            0x3B7 => CsrId::PMPADDR07 ,
+            0x3B8 => CsrId::PMPADDR08 ,
+            0x3B9 => CsrId::PMPADDR09 ,
+            0x3BA => CsrId::PMPADDR10 ,
+            0x3BB => CsrId::PMPADDR11 ,
+            0x3BC => CsrId::PMPADDR12 ,
+            0x3BD => CsrId::PMPADDR13 ,
+            0x3BE => CsrId::PMPADDR14 ,
+            0x3BF => CsrId::PMPADDR15 ,
+            0xB00 => CsrId::MCYCLE ,
+            0xB02 => CsrId::MINSTRET ,
+            0xB03 => CsrId::MHMPCOUNTER03 ,
+            0xB04 => CsrId::MHMPCOUNTER04 ,
+            0xB05 => CsrId::MHMPCOUNTER05 ,
+            0xB06 => CsrId::MHMPCOUNTER06 ,
+            0xB07 => CsrId::MHMPCOUNTER07 ,
+            0xB08 => CsrId::MHMPCOUNTER08 ,
+            0xB09 => CsrId::MHMPCOUNTER09 ,
+            0xB0A => CsrId::MHMPCOUNTER10 ,
+            0xB0B => CsrId::MHMPCOUNTER11 ,
+            0xB0C => CsrId::MHMPCOUNTER12 ,
+            0xB0D => CsrId::MHMPCOUNTER13 ,
+            0xB0E => CsrId::MHMPCOUNTER14 ,
+            0xB0F => CsrId::MHMPCOUNTER15 ,
+            0xB10 => CsrId::MHMPCOUNTER16 ,
+            0xB11 => CsrId::MHMPCOUNTER17 ,
+            0xB12 => CsrId::MHMPCOUNTER18 ,
+            0xB13 => CsrId::MHMPCOUNTER19 ,
+            0xB14 => CsrId::MHMPCOUNTER20 ,
+            0xB15 => CsrId::MHMPCOUNTER21 ,
+            0xB16 => CsrId::MHMPCOUNTER22 ,
+            0xB17 => CsrId::MHMPCOUNTER23 ,
+            0xB18 => CsrId::MHMPCOUNTER24 ,
+            0xB19 => CsrId::MHMPCOUNTER25 ,
+            0xB1A => CsrId::MHMPCOUNTER26 ,
+            0xB1B => CsrId::MHMPCOUNTER27 ,
+            0xB1C => CsrId::MHMPCOUNTER28 ,
+            0xB1D => CsrId::MHMPCOUNTER29 ,
+            0xB1E => CsrId::MHMPCOUNTER30 ,
+            0xB1F => CsrId::MHMPCOUNTER31 ,
+            0xB80 => CsrId::MCYCLEH ,
+            0xB82 => CsrId::MINSTRETH ,
+            0xB83 => CsrId::MHMPCOUNTER03H ,
+            0xB84 => CsrId::MHMPCOUNTER04H ,
+            0xB85 => CsrId::MHMPCOUNTER05H ,
+            0xB86 => CsrId::MHMPCOUNTER06H ,
+            0xB87 => CsrId::MHMPCOUNTER07H ,
+            0xB88 => CsrId::MHMPCOUNTER08H ,
+            0xB89 => CsrId::MHMPCOUNTER09H ,
+            0xB8A => CsrId::MHMPCOUNTER10H ,
+            0xB8B => CsrId::MHMPCOUNTER11H ,
+            0xB8C => CsrId::MHMPCOUNTER12H ,
+            0xB8D => CsrId::MHMPCOUNTER13H ,
+            0xB8E => CsrId::MHMPCOUNTER14H ,
+            0xB8F => CsrId::MHMPCOUNTER15H ,
+            0xB90 => CsrId::MHMPCOUNTER16H ,
+            0xB91 => CsrId::MHMPCOUNTER17H ,
+            0xB92 => CsrId::MHMPCOUNTER18H ,
+            0xB93 => CsrId::MHMPCOUNTER19H ,
+            0xB94 => CsrId::MHMPCOUNTER20H ,
+            0xB95 => CsrId::MHMPCOUNTER21H ,
+            0xB96 => CsrId::MHMPCOUNTER22H ,
+            0xB97 => CsrId::MHMPCOUNTER23H ,
+            0xB98 => CsrId::MHMPCOUNTER24H ,
+            0xB99 => CsrId::MHMPCOUNTER25H ,
+            0xB9A => CsrId::MHMPCOUNTER26H ,
+            0xB9B => CsrId::MHMPCOUNTER27H ,
+            0xB9C => CsrId::MHMPCOUNTER28H ,
+            0xB9D => CsrId::MHMPCOUNTER29H ,
+            0xB9E => CsrId::MHMPCOUNTER30H ,
+            0xB9F => CsrId::MHMPCOUNTER31H ,
+            0x320 => CsrId::MCOUNTINHIBIT ,
+            0x323 => CsrId::MHPEVENT03 ,
+            0x324 => CsrId::MHPEVENT04 ,
+            0x325 => CsrId::MHPEVENT05 ,
+            0x326 => CsrId::MHPEVENT06 ,
+            0x327 => CsrId::MHPEVENT07 ,
+            0x328 => CsrId::MHPEVENT08 ,
+            0x329 => CsrId::MHPEVENT09 ,
+            0x32a => CsrId::MHPEVENT10 ,
+            0x32b => CsrId::MHPEVENT11 ,
+            0x32c => CsrId::MHPEVENT12 ,
+            0x32d => CsrId::MHPEVENT13 ,
+            0x32e => CsrId::MHPEVENT14 ,
+            0x32f => CsrId::MHPEVENT15 ,
+            0x330 => CsrId::MHPEVENT16 ,
+            0x331 => CsrId::MHPEVENT17 ,
+            0x332 => CsrId::MHPEVENT18 ,
+            0x333 => CsrId::MHPEVENT19 ,
+            0x334 => CsrId::MHPEVENT20 ,
+            0x335 => CsrId::MHPEVENT21 ,
+            0x336 => CsrId::MHPEVENT22 ,
+            0x337 => CsrId::MHPEVENT23 ,
+            0x338 => CsrId::MHPEVENT24 ,
+            0x339 => CsrId::MHPEVENT25 ,
+            0x33a => CsrId::MHPEVENT26 ,
+            0x33b => CsrId::MHPEVENT27 ,
+            0x33c => CsrId::MHPEVENT28 ,
+            0x33d => CsrId::MHPEVENT29 ,
+            0x33e => CsrId::MHPEVENT30 ,
+            0x33f => CsrId::MHPEVENT31 ,
+            0x7A0 => CsrId::TSELECT ,
+            0x7A1 => CsrId::TDATA1 ,
+            0x7A2 => CsrId::TDATA2 ,
+            0x7A3 => CsrId::TDATA3 ,
+            0x7B0 => CsrId::DCSR ,
+            0x7B1 => CsrId::DPC ,
+            0x7B2 => CsrId::DSCRATCH0 ,
+            0x7B3 => CsrId::DSCRATCH1 ,
+            _ => panic!("Bad CsrId value"),
+        }
     }
 }
 

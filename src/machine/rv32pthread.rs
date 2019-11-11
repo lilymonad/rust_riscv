@@ -145,7 +145,6 @@ impl IntegerMachine for Machine {
             self.schedule_next_core()
         }
 
-        println!("[SIM] === execute core {} ===", self.current_core);
         self.do_write_back();
         self.do_mem(mem);
         self.do_execute(mem);

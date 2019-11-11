@@ -99,12 +99,12 @@ impl IntegerMachine for Machine {
     }
 
     fn get_csr_field(&self, i:CsrField) -> i32 {
-        let x = self.csr_file[i.get_csr_id().0 as usize];
+        let x = self.csr_file[i.get_csr_id() as usize];
         (x & (i.mask::<i32>() as i32)) >> i.offset::<i32>()
     }
 
     fn set_csr_field(&mut self, i:CsrField, value:i32) {
-        let num : &mut i32 = &mut self.csr_file[i.get_csr_id().0 as usize];
+        let num : &mut i32 = &mut self.csr_file[i.get_csr_id() as usize];
         let mask : i32 = i.mask();
         let notmask = !mask;
 
@@ -207,7 +207,6 @@ impl Machine {
         let i = self.dc2ex.instruction;
         let mut illegal = false;
 
-        println!("[CORE] execute {} at {:x}", i, curr_pc);
         match i.get_opcode_enum() {
             OpCode::LUI => {
                 to_mem.wb_perform = true;
@@ -415,7 +414,7 @@ impl Machine {
                         }
                     },
                     0b001 => { /* CSRRW */
-                        let csr = CsrId(i.get_imm_i() as u16);
+                        let csr = CsrId::from(i.get_imm_i() as u16);
                         let rs1 = i.get_rs1() as usize;
                         let rd = i.get_rd() as usize;
 
@@ -429,7 +428,7 @@ impl Machine {
                             }).is_none();
                     },
                     0b010 => { /* CSRRS */
-                        let csr = CsrId(i.get_imm_i() as u16);
+                        let csr = CsrId::from(i.get_imm_i() as u16);
                         let rs1 = i.get_rs1() as usize;
                         let rd = i.get_rd() as usize;
 
@@ -443,7 +442,7 @@ impl Machine {
                             }).is_none();
                     },
                     0b011 => { /* CSRRC */ 
-                        let csr = CsrId(i.get_imm_i() as u16);
+                        let csr = CsrId::from(i.get_imm_i() as u16);
                         let rs1 = i.get_rs1() as usize;
                         let rd = i.get_rd() as usize;
 
@@ -457,7 +456,7 @@ impl Machine {
                             }).is_none();
                     },
                     0b101 => { /* CSRRWI */
-                        let csr = CsrId(i.get_imm_i() as u16);
+                        let csr = CsrId::from(i.get_imm_i() as u16);
                         let rs1 = i.get_rs1() as usize;
                         let rd = i.get_rd() as usize;
 
@@ -471,7 +470,7 @@ impl Machine {
                             }).is_none();
                     },
                     0b110 => { /* CSRRSI */
-                        let csr = CsrId(i.get_imm_i() as u16);
+                        let csr = CsrId::from(i.get_imm_i() as u16);
                         let rs1 = i.get_rs1() as usize;
                         let rd = i.get_rd() as usize;
 
@@ -485,7 +484,7 @@ impl Machine {
                             }).is_none();
                     },
                     0b111 => { /* CSRRCI */
-                        let csr = CsrId(i.get_imm_i() as u16);
+                        let csr = CsrId::from(i.get_imm_i() as u16);
                         let rs1 = i.get_rs1() as usize;
                         let rd = i.get_rd() as usize;
 
