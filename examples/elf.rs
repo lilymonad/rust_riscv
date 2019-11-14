@@ -56,7 +56,7 @@ fn main() {
     machine.set_pc(pc);
     machine.set_i_register(1, 0);
     let mut i = 0;
-    //for i in 0..500 {
+
     loop {
         machine.cycle(&mut code);
         i += 1;

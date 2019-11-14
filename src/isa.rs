@@ -398,10 +398,14 @@ impl Instruction {
         }
     }
 
+    /// Tells if an instruction is a C instruction (compressed instruction from
+    /// the C extension of RISC-V). A compressed instruction is 16bits wide.
     pub fn is_compressed(&self) -> bool {
         (self.get_opcode() & 0b11) != 0b11
     }
 
+    /// Translates a C instruction into a RV32 one, useful for machines that
+    /// want to implement C extension by only implementing the RV32 base
     // TODO: test it
     pub fn uncompressed(&self) -> Instruction {
         match self.get_opcode() & 0b11 {
@@ -503,6 +507,8 @@ impl Instruction {
         }
     }
 
+    /// Display the values of registers instead of their name.
+    /// It is useful for debugging, to know if a register has a bad value.
     pub fn display_values(&self, rs:&[i32]) -> String {
          match self.get_type() {
             Type::R => {

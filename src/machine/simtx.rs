@@ -44,7 +44,10 @@ impl Path {
 struct Warp {
     pub cores: Vec<Core>,
     pub paths: Vec<Path>,
-    pub current_path : usize,
+    pub current_path: usize,
+
+    // Log variables
+    branch_mask_hist: HashMap<i32, Vec<BitVec>>,
 }
 
 impl Warp {
@@ -58,6 +61,7 @@ impl Warp {
             cores: cs,
             paths: ps,
             current_path: 0,
+            branch_mask_hist: HashMap::new(),
         }
     }
 
@@ -122,12 +126,20 @@ impl Warp {
         }
     }
 
+    fn update_branch_hist(&mut self, pc:i32, mask:BitVec) {
+        if let Some(hist) = self.branch_mask_hist.get_mut(&pc) {
+            hist.push(mask);
+        } else {
+            self.branch_mask_hist.insert(pc, vec![mask]);
+        }
+    }
+
     pub fn execute(&mut self, mem:&mut dyn Memory) {
         if self.current_path == 0xFFFFFFFF { return }
 
-        let cid = self.get_single_core_id();
-        let regs = &self.cores[cid].registers;
-        let path = &mut self.paths[self.current_path];
+        let pid = self.current_path;
+        let path = self.paths[pid].clone();
+        let mask = &path.execution_mask;
         let pc = path.fetch_pc;
         let next_pc = pc.wrapping_add(4);
         let inst = Instruction(mem.get_32(pc as usize));
@@ -142,16 +154,19 @@ impl Warp {
                 });
             },
             OpCode::AUIPC => { // direct jumps are always uniform
-                path.fetch_pc = pc.wrapping_add(inst.get_imm_u());
+                self.paths[pid].fetch_pc = pc.wrapping_add(inst.get_imm_u());
                 update_pc = false
             },
             OpCode::JAL => {
-                mem.set_32(inst.get_rd() as usize, pc.wrapping_add(4) as u32);
-                path.fetch_pc = pc.wrapping_add(inst.get_imm_j());
+                if inst.get_rd() != 0 {
+                    self.for_each_core_alive(&mut |core| {
+                        core.registers[inst.get_rd() as usize] = pc.wrapping_add(4);
+                    });
+                }
+                self.paths[pid].fetch_pc = pc.wrapping_add(inst.get_imm_j());
                 update_pc = false
             },
             OpCode::JALR => { // indirect jump can be divergent multiple times
-                mem.set_32(inst.get_rd() as usize, pc.wrapping_add(4) as u32);
 
                 let mut nph : HashMap<i32, BitVec> = HashMap::new();
 
@@ -161,13 +176,16 @@ impl Warp {
                     if path.execution_mask[i] {
                         let new_pc = inst.get_imm_i().
                             wrapping_add(core.registers[inst.get_rs1() as usize]);
-                        if nph.contains_key(&new_pc) {
-                            nph.get_mut(&new_pc).unwrap().set(i, true);
+                        if let Some(bv) = nph.get_mut(&new_pc) {
+                            bv.set(i, true);
                         } else {
                             let mut bv = BitVec::new();
                             bv.resize(nth, false);
                             bv.set(i, true);
                             nph.insert(new_pc, bv);
+                        }
+                        if inst.get_rd() != 0 {
+                            core.registers[inst.get_rd() as usize] = pc.wrapping_add(4);
                         }
                     }
                 }
@@ -175,7 +193,7 @@ impl Warp {
                 // Check if it's a uniform jump
                 // and just update the pc of the current path if it is
                 if nph.len() == 1 {
-                    path.fetch_pc = *nph.keys().next().unwrap();
+                    self.paths[pid].fetch_pc = *nph.keys().next().unwrap();
                 } else {
                     // If not, create as many paths as needed and inject them
                     self.paths.remove(self.current_path);
@@ -224,9 +242,9 @@ impl Warp {
 
                 // update path, and add new paths if divergent
                 if !not_taken_mask.any() {    // uniform taken
-                    path.fetch_pc = tpc;
+                    self.paths[pid].fetch_pc = tpc;
                 } else if !taken_mask.any() { // uniform not taken
-                    path.fetch_pc = ntpc;
+                    self.paths[pid].fetch_pc = ntpc;
                 } else {                      // divergent
                     self.paths.remove(self.current_path);
                     self.paths.push(Path::from_pc_mask(tpc, taken_mask));
@@ -320,8 +338,9 @@ impl Warp {
             _ => {}
         }
 
+        self.update_branch_hist(pc, mask.clone());
         if update_pc {
-            self.paths[self.current_path].fetch_pc = next_pc
+            self.paths[pid].fetch_pc = next_pc
         }
     }
 }
@@ -369,6 +388,7 @@ impl IntegerMachine for Machine {
 
         for wid in 0..self.warps.len() {
             self.warps[wid].schedule_path();
+
             let pathid = self.warps[wid].current_path;
             if self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
 
