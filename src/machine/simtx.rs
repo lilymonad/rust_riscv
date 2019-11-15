@@ -3,6 +3,8 @@ use isa::{CsrField, Instruction, OpCode};
 use memory::*;
 use bitvec::vec::BitVec;
 
+use std::fmt;
+
 use std::collections::HashMap;
 
 /// Defines the state of a single hardware thread.
@@ -38,6 +40,12 @@ impl Path {
     }
 }
 
+impl fmt::Display for Path {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(0x{:x}, {})", self.fetch_pc, self.execution_mask)
+    }
+}
+
 /// Defines a hardware warp (a group of threads) which all execute instructions
 /// in an SIMD fasion.
 #[derive(Clone)]
@@ -65,6 +73,14 @@ impl Warp {
         }
     }
 
+    pub fn get_path_of_core(&self, cid:usize) -> &Path {
+        for p in &self.paths {
+            if p.execution_mask[cid] { return p }
+        }
+
+        panic!("No path");
+    }
+
     pub fn get_single_core_id(&mut self) -> usize {
         let mask = &self.paths[self.current_path].execution_mask;
         for i in 0..self.cores.len() {
@@ -79,12 +95,16 @@ impl Warp {
     pub fn schedule_path(&mut self) {
         if self.paths.is_empty() { self.current_path = 0xFFFFFFFF }
         else {
-            let old_pc = self.paths[self.current_path].fetch_pc;
+            let old_pc = if self.current_path == 0xFFFFFFFF {
+                0
+            } else {
+                self.paths[self.current_path].fetch_pc
+            };
             let mut fusionned = HashMap::new();
             let mut fusion = false;
             for p in &self.paths {
-                if fusionned.contains_key(&p.fetch_pc) {
-                    let lhs = fusionned.get_mut(&p.fetch_pc).unwrap();
+                if let Some(lhs) = fusionned.get_mut(&p.fetch_pc) {
+                    println!("Fusionned {} and {} @ 0x{}", lhs, p.execution_mask, p.fetch_pc);
                     *lhs |= p.execution_mask.clone();
                     fusion = true;
                 } else {
@@ -108,7 +128,7 @@ impl Warp {
         }
     }
 
-    pub fn for_each_core_alive(&mut self, f:&mut dyn FnMut(&mut Core) -> ()) {
+    pub fn for_each_core_alive<T:FnMut(&mut Core)->()>(&mut self, mut f:T) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
             if path.execution_mask[i] {
@@ -117,7 +137,12 @@ impl Warp {
         }
     }
 
-    fn _for_each_core_alive_i(&mut self, f:&mut dyn FnMut(usize, &mut Core) -> ()) {
+    pub fn alive_cores_ids(&self) -> impl Iterator<Item=usize> {
+        let bv = self.paths[self.current_path].execution_mask.clone();
+        (0..self.cores.len()).into_iter().filter(move |i| bv[*i])
+    }
+
+    fn for_each_core_alive_i<T:FnMut(usize, &mut Core)->()>(&mut self, mut f:T) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
             if path.execution_mask[i] {
@@ -149,7 +174,7 @@ impl Warp {
         let mut update_pc = true;
         match inst.get_opcode_enum() {
             OpCode::LUI => {
-                self.for_each_core_alive(&mut | core : &mut Core | {
+                self.for_each_core_alive(|core| {
                     core.registers[inst.get_rd() as usize] = inst.get_imm_u();
                 });
             },
@@ -159,7 +184,7 @@ impl Warp {
             },
             OpCode::JAL => {
                 if inst.get_rd() != 0 {
-                    self.for_each_core_alive(&mut |core| {
+                    self.for_each_core_alive(|core| {
                         core.registers[inst.get_rd() as usize] = pc.wrapping_add(4);
                     });
                 }
@@ -171,24 +196,21 @@ impl Warp {
                 let mut nph : HashMap<i32, BitVec> = HashMap::new();
 
                 // Compute new paths based on the new thread PCs
-                for i in 0..nth {
-                    let core = &mut self.cores[i];
-                    if path.execution_mask[i] {
-                        let new_pc = inst.get_imm_i().
-                            wrapping_add(core.registers[inst.get_rs1() as usize]);
-                        if let Some(bv) = nph.get_mut(&new_pc) {
-                            bv.set(i, true);
-                        } else {
-                            let mut bv = BitVec::new();
-                            bv.resize(nth, false);
-                            bv.set(i, true);
-                            nph.insert(new_pc, bv);
-                        }
-                        if inst.get_rd() != 0 {
-                            core.registers[inst.get_rd() as usize] = pc.wrapping_add(4);
-                        }
+                self.for_each_core_alive_i(|i, core| {
+                    let new_pc = inst.get_imm_i().
+                        wrapping_add(core.registers[inst.get_rs1() as usize]);
+                    if let Some(bv) = nph.get_mut(&new_pc) {
+                        bv.set(i, true);
+                    } else {
+                        let mut bv = BitVec::new();
+                        bv.resize(nth, false);
+                        bv.set(i, true);
+                        nph.insert(new_pc, bv);
                     }
-                }
+                    if inst.get_rd() != 0 {
+                        core.registers[inst.get_rd() as usize] = pc.wrapping_add(4);
+                    }
+                });
 
                 // Check if it's a uniform jump
                 // and just update the pc of the current path if it is
@@ -214,31 +236,28 @@ impl Warp {
                 not_taken_mask.resize(nth, false);
 
                 // compute taken/not_taken masks for each alive thread
-                for i in 0..nth {
-                    if path.execution_mask[i] {
-                        let core = &self.cores[i];
-                        let r1 = inst.get_rs1() as usize;
-                        let v1 = core.registers[r1];
-                        let uv1 = v1 as u32;
+                self.for_each_core_alive_i(|i, core| {
+                    let r1 = inst.get_rs1() as usize;
+                    let v1 = core.registers[r1];
+                    let uv1 = v1 as u32;
 
-                        let r2 = inst.get_rs2() as usize;
-                        let v2 = core.registers[r2];
-                        let uv2 = v2 as u32;
+                    let r2 = inst.get_rs2() as usize;
+                    let v2 = core.registers[r2];
+                    let uv2 = v2 as u32;
 
-                        let take = match inst.get_funct3() {
-                            0b000 => {v1 ==  v2}, // BEQ
-                            0b001 => {v1 !=  v2 }, // BNE
-                            0b100 => {v1 <   v2 }, // BLT
-                            0b101 => { v1 >=  v2 }, // BGE
-                            0b110 =>{ uv1 <  uv2 }, // BLTU
-                            0b111 =>{ uv1 >= uv2 }, // BGEU
-                            _ => false,
-                        };
+                    let take = match inst.get_funct3() {
+                        0b000 => {v1 ==  v2}, // BEQ
+                        0b001 => {v1 !=  v2 }, // BNE
+                        0b100 => {v1 <   v2 }, // BLT
+                        0b101 => { v1 >=  v2 }, // BGE
+                        0b110 =>{ uv1 <  uv2 }, // BLTU
+                        0b111 =>{ uv1 >= uv2 }, // BGEU
+                        _ => false,
+                    };
 
-                        taken_mask.set(i, take);
-                        not_taken_mask.set(i, !take);
-                    }
-                }
+                    taken_mask.set(i, take);
+                    not_taken_mask.set(i, !take);
+                });
 
                 // update path, and add new paths if divergent
                 if !not_taken_mask.any() {    // uniform taken
@@ -255,7 +274,7 @@ impl Warp {
             },
             OpCode::LOAD => {
                 let width = inst.get_funct3();
-                self.for_each_core_alive(&mut |core| {
+                self.for_each_core_alive(|core| {
                     let base = core.registers[inst.get_rs1() as usize] as usize;
                     let addr = base.wrapping_add(inst.get_imm_i() as usize);
                     core.registers[inst.get_rd() as usize] =
@@ -269,7 +288,7 @@ impl Warp {
             },
             OpCode::STORE => {
                 let width = inst.get_funct3();
-                self.for_each_core_alive(&mut |core| {
+                self.for_each_core_alive(|core| {
                     let base = core.registers[inst.get_rs1() as usize] as usize;
                     let addr = base.wrapping_add(inst.get_imm_s() as usize);
                     let src = core.registers[inst.get_rs2() as usize];
@@ -282,7 +301,7 @@ impl Warp {
                 });
             },
             OpCode::OPIMM => {
-                self.for_each_core_alive(&mut |core| {
+                self.for_each_core_alive(|core| {
                     let dst = inst.get_rd() as usize;
 
                     let v1 = core.registers[inst.get_rs1() as usize];
@@ -306,7 +325,7 @@ impl Warp {
                 });
             },
             OpCode::OPREG => {
-                self.for_each_core_alive(&mut |core| {
+                self.for_each_core_alive(|core| {
                     let dst = inst.get_rd() as usize;
                     let v1 = core.registers[inst.get_rs1() as usize];
                     let v2 = core.registers[inst.get_rs2() as usize];
@@ -338,11 +357,36 @@ impl Warp {
             _ => {}
         }
 
-        self.update_branch_hist(pc, mask.clone());
+        // If it was a jump, we update the mask history
+        // for later analysis
+        //
+        // If it's not, we just advance the pc
         if update_pc {
             self.paths[pid].fetch_pc = next_pc
+        } else {
+            self.update_branch_hist(pc, mask.clone());
         }
     }
+}
+
+impl fmt::Display for Warp {
+    fn fmt(&self, f:&mut fmt::Formatter<'_>) -> fmt::Result {
+        let prelude = write!(f, "Warp {}c, \n", self.cores.len());
+        self.paths.iter().fold(prelude, |res, p| {
+            res.and(write!(f, "\t{}\n", p))
+        })
+    }
+}
+
+/// The barrier type, used to emulate pthread_barrier_* primitives.
+/// As a barrier can be associated with its pointer, when creating a barrier,
+/// we register a Barrier object associated with its pointer.
+///
+/// Barriers reinitialize when they are opened (when enough threads are waiting)
+/// so we need to store the initial capacity to reinit the barrier.
+struct Barrier {
+    initial_cap:i32,
+    current_cap:i32,
 }
 
 /// The SIMT-X machine. To handle `pthread` or `omp` system calls, we detect them
@@ -352,31 +396,86 @@ pub struct Machine {
     plt_addresses:HashMap<i32, String>,
     idle_threads:Vec<usize>,
     finished:BitVec,
+    barriers:HashMap<i32, Barrier>,
+    in_barrier:Vec<i32>,
 }
 
 impl Machine {
-    pub fn new(tpw:usize, nb_warps:usize, plt:HashMap<i32, String>) -> Machine {
-        let mut ws = Vec::new();
-        ws.resize(nb_warps, Warp::new(tpw));
+    pub fn new(tpw:usize, nb_warps:usize, plt_addresses:HashMap<i32, String>) -> Machine {
+        let mut warps = Vec::new();
+        warps.resize(nb_warps, Warp::new(tpw));
 
-        let mut idle = Vec::new();
+        let mut idle_threads = Vec::new();
         for i in (0..tpw*nb_warps).rev() {
-            idle.push(i)
+            idle_threads.push(i)
         }
 
-        let mut fin = BitVec::new();
-        fin.resize(tpw*nb_warps, false);
+        let mut in_barrier = Vec::new();
+        in_barrier.resize(tpw*nb_warps, 0);
+        let mut finished = BitVec::new();
+        finished.resize(tpw*nb_warps, false);
+        //let mut just_freed = BitVec::new();
+        //just_freed.resize(tpw*nb_warps, false);
 
         Machine {
-            warps: ws.clone(),
-            plt_addresses:plt,
-            idle_threads:idle.clone(),
-            finished:fin,
+            warps,
+            plt_addresses,
+            idle_threads,
+            finished,
+            barriers:HashMap::new(),
+            in_barrier,
+            //just_freed,
         }
     }
 
     fn pop_first_idle(&mut self) -> usize {
         self.idle_threads.pop().expect("No more threads")
+    }
+
+    pub fn print_stats(&self) {
+        for wid in 0..self.warps.len() {
+            println!("=== STATS FOR WARP {} ===", wid);
+            let warp = &self.warps[wid];
+            for (pc, hist) in &warp.branch_mask_hist {
+                println!("\t0x{:x}", pc);
+                for bv in hist {
+                    println!("\t{}", bv);
+                }
+            }
+        }
+    }
+
+    fn free_barrier(&mut self, barr:i32) {
+        for wid in 0..self.warps.len() {
+            let warp = &mut self.warps[wid];
+            let tpw = warp.cores.len();
+            for pid in 0..warp.paths.len() {
+                let pc = warp.paths[pid].fetch_pc;
+                let mask = warp.paths[pid].execution_mask.clone();
+                let mut bv_cont = BitVec::new(); bv_cont.resize(tpw, false);
+                let mut bv_barr = BitVec::new(); bv_barr.resize(tpw, false);
+                for cid in (0..tpw).filter(|i| mask[*i]) {
+                    let tid = wid * tpw + cid;
+                    if self.in_barrier[tid] == barr {
+                        self.in_barrier[tid] = 0;
+                        bv_cont.set(cid, true);
+                    } else {
+                        bv_barr.set(cid, true);
+                    }
+                }
+
+                if bv_cont.any() {
+                    println!("advancing path");
+                    warp.paths[pid].execution_mask = bv_cont;
+                    warp.paths[pid].fetch_pc += 4;
+                    
+                    if bv_barr.any() {
+                        println!("adding not advanced threads");
+                        warp.paths.push(Path::from_pc_mask(pc, bv_barr));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -389,8 +488,9 @@ impl IntegerMachine for Machine {
         for wid in 0..self.warps.len() {
             self.warps[wid].schedule_path();
 
+            println!("executing {} {}", wid, self.warps[wid]);
             let pathid = self.warps[wid].current_path;
-            if self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
+            if pathid == 0xFFFFFFFF || self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
 
             let pc = self.warps[wid].paths[pathid].fetch_pc;
             let i = Instruction(mem.get_32(pc as usize));
@@ -407,6 +507,7 @@ impl IntegerMachine for Machine {
 
                         // allocate a new thread (get its id)
                         let tid = self.pop_first_idle();
+                        println!("allocating thread {}", tid);
                         let w = tid / tpw; let t = tid % tpw;
 
                         let cid = self.warps[wid].get_single_core_id();
@@ -424,20 +525,63 @@ impl IntegerMachine for Machine {
                         let mut m = BitVec::new(); m.resize(tpw, false);
                         m.set(t, true);
 
-                        self.warps[wid].paths.push(Path::from_pc_mask(npc, m));
+                        self.warps[w].paths.push(Path::from_pc_mask(npc, m));
 
                         // return 0 and advance current path
                         self.warps[wid].cores[cid].registers[10] = 0;
                         self.warps[wid].paths[pathid].fetch_pc += 4;
                     } else if func_name.contains("pthread_join") {
                         let cid = self.warps[wid].get_single_core_id();
-                        let to_wait = self.warps[wid].cores[cid].registers[10];
-                        if self.finished[to_wait as usize] {
+                        let to_wait = self.warps[wid].cores[cid].registers[10] as usize;
+                        let w_to_wait = to_wait / tpw;
+                        let c_to_wait = to_wait % tpw;
+
+                        if self.warps[w_to_wait].get_path_of_core(c_to_wait).fetch_pc == 0 {
                             self.warps[wid].paths[pathid].fetch_pc += 4;
                         }
-                    } else if func_name.contains("puts") {
+                    } else if func_name.contains("pthread_barrier_init") {
                         let cid = self.warps[wid].get_single_core_id();
-                        println!("Core #{} [puts]", cid+wid*tpw);
+                        let num = self.warps[wid].cores[cid].registers[12];
+                        let ptr = self.warps[wid].cores[cid].registers[10];
+
+                        self.barriers.insert(ptr, Barrier {
+                            initial_cap:num,
+                            current_cap:num,
+                        });
+
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    } else if func_name.contains("pthread_barrier_wait") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let core = &self.warps[wid].cores[i];
+                            let tid = wid*tpw + i;
+                            let ptr = core.registers[10];
+
+                            // don't re-execute the wait
+                            if self.in_barrier[tid] == ptr { continue }
+
+                            // if the barrier exists
+                            if let Some(barr) = self.barriers.get_mut(&ptr) {
+
+                                // put thread in barrier
+                                self.in_barrier[tid] = ptr;
+                                // decrement its capacity
+                                barr.current_cap -= 1;
+
+                                // it the barrier must open, free all threads
+                                // then stop the loop
+                                if barr.current_cap == 0 {
+                                    println!("freeing barrier");
+                                    barr.current_cap = barr.initial_cap;
+                                    self.free_barrier(ptr);
+                                    break;
+                                }
+                            }
+                        }
+                    } else if func_name.contains("puts") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let tid = i + wid*tpw;
+                            println!("Core #{} [puts]", tid);
+                        }
                         self.warps[wid].paths[pathid].fetch_pc += 4;
                     }
                 } else {
@@ -446,13 +590,13 @@ impl IntegerMachine for Machine {
             } else {
                 self.warps[wid].execute(mem)
             }
-
-            for i in 0..tpw {
-                if self.warps[wid].paths[pathid].execution_mask[i] &&
-                    self.warps[wid].cores[i].registers[2] == ((i as i32) *(-1024)) {
-                        self.finished.set(i, true);
+/*
+            for i in self.warps[wid].alive_cores_ids() {
+                if self.warps[wid].cores[i].registers[2] == ((i as i32) *(-1024)) {
+                    self.finished.set(i, true);
                 }
             }
+*/
         }
     }
 

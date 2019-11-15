@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 
 fn main() {
-    let path = PathBuf::from("resources/threaded2");
+    let path = PathBuf::from("resources/barrier");
     let file = elflib::File::open_path(&path)
         .expect("ELF file not found");
 
@@ -51,7 +51,7 @@ fn main() {
         rodata_i += 1
     }
 
-    let mut machine = SIMTX::new(4, 1, calls);//Machine::new(calls);
+    let mut machine = SIMTX::new(2, 2, calls);//Machine::new(calls);
     println!("setting pc to 0x{:x}", pc as usize);
     machine.set_pc(pc);
     machine.set_i_register(1, 0);
@@ -66,5 +66,6 @@ fn main() {
         }
     }
 
+    machine.print_stats();
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register(10))
 }
