@@ -1,11 +1,22 @@
+extern crate elf as elflib;
 extern crate riscv_sandbox;
 
 use riscv_sandbox::memory::Memory;
-use riscv_sandbox::machine::{rv32imc::Machine as RV32I, *};
+use riscv_sandbox::machine::{rv32imc::Machine as RV32I
+    , rv32pthread::Machine as RV32Threaded
+    , simtx::Machine as SIMTX
+    , *};
 use riscv_sandbox::isa::{Instruction, OpCode};
+use riscv_sandbox::elf::{*};
 
+use std::path::PathBuf;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+
+use std::fs::{self, *};
+use std::io::{BufReader, BufRead};
+use std::ffi::OsString;
 
 #[test]
 fn registers() {
@@ -134,4 +145,68 @@ fn fibonacci() {
     assert_eq!(machine.get_register(2), 8);
     assert_eq!(machine.get_register(3), 8);
     assert_eq!(machine.get_register(4), 5);
+}
+
+#[test]
+fn real_world_tests_simtx() {
+    let ex_dir = "resources/executables/";
+    let res_dir = "resources/memory_snapshots/simtx/";
+    let executables = fs::read_dir(ex_dir)
+        .expect("Cannot read 'resources/executables' directory")
+        .map(|entry| entry.map(|e| e.file_name()
+                                         .into_string())
+                          .expect("Entry doesn't exist")
+                          .expect("Bad entry name format"));
+
+    for exec_path in executables {
+        let file = elflib::File::open_path(String::from(ex_dir) + &exec_path)
+            .expect("ELF file not found");
+
+        let calls = elf::get_plt_symbols(&file)
+            .expect("No .plt section in the ELF");
+        let pc = elf::get_main_pc(&file)
+            .expect("This ELF file has no function named 'main'");
+
+        // create some memory buffer to load instructions and rodata
+        let mut memory : HashMap<usize, u32> = HashMap::new();
+        assert!(elf::load_instructions(&file, &mut memory)
+                , "This ELF file has no .text section");
+
+        if !elf::load_rodata(&file, &mut memory) {
+                println!("This ELF file has no .rodata section");
+        }
+
+        // create the machine and set it up
+        let mut machine = SIMTX::new(tpw, nb_warps, calls);
+        println!("setting pc to 0x{:x}", pc as usize);
+        machine.set_pc(pc);
+        machine.set_i_register(1, 0);
+        let mut i = 0;
+
+        // execute the program until its end
+        loop {
+            machine.cycle(&mut memory);
+            i += 1;
+
+            if machine.finished() {
+                break;
+            }
+        }
+
+        let snapshot = File::open(String::from(res_dir) + &exec_path)
+            .expect("Snapshot file not found");
+        let mut buffer = BufReader::new(&snapshot);
+        for line in buffer.lines() {
+            if let Ok(l) = line {
+                let mut linebuf = l.split_ascii_whitespace();
+                let key : usize = linebuf.next().and_then(|s| s.parse().ok())
+                    .expect("Snapshot bad format");
+                let value : u32 = linebuf.next().and_then(|s| s.parse().ok())
+                    .expect("Snapshot bad format");
+
+                code.get(&key).map(|v| assert_eq!(*v, value) )
+                    .unwrap();
+            }
+        }
+    }
 }

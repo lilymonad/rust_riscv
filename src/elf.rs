@@ -22,6 +22,19 @@ pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> bool {
     })
 }
 
+/// Use this function to load `.rodata` section into a memory buffer.
+pub fn load_rodata(file:&elflib::File, mem:&mut dyn Memory) -> bool {
+    file.get_section(".rodata").map_or(false, | section | -> bool {
+        let mut rodata_i = section.shdr.addr as usize;
+        for byte in &section.data {
+            mem.set_8(rodata_i, *byte);
+            rodata_i += 1
+        }
+
+        true
+    })
+}
+
 /// Use this function to retrieve the mapping of linked functions addresses to
 /// their name. Useful when emulating `libc` calls.
 pub fn get_plt_symbols(file:&elflib::File) -> Option<HashMap<i32, String>> {
@@ -37,4 +50,19 @@ pub fn get_plt_symbols(file:&elflib::File) -> Option<HashMap<i32, String>> {
     }
 
     Some(ret)
+}
+
+
+/// Use this function to retrieve the address of a binary symbol in the elf.
+pub fn get_main_pc(file:&elflib::File) -> Option<i32> {
+    let symtab = file.get_section(".symtab")?;
+    let symbols = file.get_symbols(symtab).ok()?;
+
+    for sym in symbols {
+        if sym.name == "main" {
+            return Some(sym.value as i32)
+        }
+    }
+
+    None
 }

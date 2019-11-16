@@ -104,7 +104,6 @@ impl Warp {
             let mut fusion = false;
             for p in &self.paths {
                 if let Some(lhs) = fusionned.get_mut(&p.fetch_pc) {
-                    println!("Fusionned {} and {} @ 0x{}", lhs, p.execution_mask, p.fetch_pc);
                     *lhs |= p.execution_mask.clone();
                     fusion = true;
                 } else {
@@ -395,7 +394,6 @@ pub struct Machine {
     warps:Vec<Warp>,
     plt_addresses:HashMap<i32, String>,
     idle_threads:Vec<usize>,
-    finished:BitVec,
     barriers:HashMap<i32, Barrier>,
     in_barrier:Vec<i32>,
 }
@@ -412,19 +410,13 @@ impl Machine {
 
         let mut in_barrier = Vec::new();
         in_barrier.resize(tpw*nb_warps, 0);
-        let mut finished = BitVec::new();
-        finished.resize(tpw*nb_warps, false);
-        //let mut just_freed = BitVec::new();
-        //just_freed.resize(tpw*nb_warps, false);
 
         Machine {
             warps,
             plt_addresses,
             idle_threads,
-            finished,
             barriers:HashMap::new(),
             in_barrier,
-            //just_freed,
         }
     }
 
@@ -465,12 +457,10 @@ impl Machine {
                 }
 
                 if bv_cont.any() {
-                    println!("advancing path");
                     warp.paths[pid].execution_mask = bv_cont;
                     warp.paths[pid].fetch_pc += 4;
                     
                     if bv_barr.any() {
-                        println!("adding not advanced threads");
                         warp.paths.push(Path::from_pc_mask(pc, bv_barr));
                     }
                 }
@@ -488,7 +478,6 @@ impl IntegerMachine for Machine {
         for wid in 0..self.warps.len() {
             self.warps[wid].schedule_path();
 
-            println!("executing {} {}", wid, self.warps[wid]);
             let pathid = self.warps[wid].current_path;
             if pathid == 0xFFFFFFFF || self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
 
@@ -507,7 +496,6 @@ impl IntegerMachine for Machine {
 
                         // allocate a new thread (get its id)
                         let tid = self.pop_first_idle();
-                        println!("allocating thread {}", tid);
                         let w = tid / tpw; let t = tid % tpw;
 
                         let cid = self.warps[wid].get_single_core_id();
@@ -570,7 +558,6 @@ impl IntegerMachine for Machine {
                                 // it the barrier must open, free all threads
                                 // then stop the loop
                                 if barr.current_cap == 0 {
-                                    println!("freeing barrier");
                                     barr.current_cap = barr.initial_cap;
                                     self.free_barrier(ptr);
                                     break;

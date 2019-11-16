@@ -4,11 +4,6 @@ use memory::Memory;
 use machine::rv32imc::{self, Machine as RV32I};
 use std::collections::HashMap;
 
-struct ThreadData {
-    pub registers : [ i32; 31 ],
-    pub pc : i32,
-}
-
 pub struct Machine {
     cores : [ RV32I ; 4 ],
     joining : [ i32 ; 4 ],
