@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "riscv-sandbox"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitvec 0.15.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "elf 0.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
