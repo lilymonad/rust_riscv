@@ -3,24 +3,19 @@ extern crate riscv_sandbox;
 
 use riscv_sandbox::memory::Memory;
 use riscv_sandbox::machine::{rv32imc::Machine as RV32I
-    , rv32pthread::Machine as RV32Threaded
+    //, rv32pthread::Machine as RV32Threaded
     , simtx::Machine as SIMTX
     , *};
 use riscv_sandbox::isa::{Instruction, OpCode};
-use riscv_sandbox::elf::{*};
+use riscv_sandbox::elf;
 
-use std::path::PathBuf;
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::cell::RefCell;
 
 use std::fs::{self, *};
 use std::io::{BufReader, BufRead};
-use std::ffi::OsString;
 
 #[test]
 fn registers() {
-    let mem : Vec<u8> = Vec::new();
     let mut proc = RV32I::new();
 
     for i in 0..31 {
@@ -177,16 +172,14 @@ fn real_world_tests_simtx() {
         }
 
         // create the machine and set it up
-        let mut machine = SIMTX::new(tpw, nb_warps, calls);
+        let mut machine = SIMTX::new(4, 4, calls);
         println!("setting pc to 0x{:x}", pc as usize);
         machine.set_pc(pc);
         machine.set_i_register(1, 0);
-        let mut i = 0;
 
         // execute the program until its end
         loop {
             machine.cycle(&mut memory);
-            i += 1;
 
             if machine.finished() {
                 break;
@@ -195,7 +188,7 @@ fn real_world_tests_simtx() {
 
         let snapshot = File::open(String::from(res_dir) + &exec_path)
             .expect("Snapshot file not found");
-        let mut buffer = BufReader::new(&snapshot);
+        let buffer = BufReader::new(&snapshot);
         for line in buffer.lines() {
             if let Ok(l) = line {
                 let mut linebuf = l.split_ascii_whitespace();
@@ -204,8 +197,8 @@ fn real_world_tests_simtx() {
                 let value : u32 = linebuf.next().and_then(|s| s.parse().ok())
                     .expect("Snapshot bad format");
 
-                code.get(&key).map(|v| assert_eq!(*v, value) )
-                    .unwrap();
+                memory.get(&key).map(|v| assert_eq!(*v, value))
+                    .expect("Address should be set");
             }
         }
     }

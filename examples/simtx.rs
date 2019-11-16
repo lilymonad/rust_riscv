@@ -2,13 +2,8 @@ extern crate elf as elflib;
 extern crate riscv_sandbox;
 
 use riscv_sandbox::elf;
-use riscv_sandbox::machine::{IntegerMachine, rv32pthread::Machine, simtx::Machine as SIMTX};
-use riscv_sandbox::memory::Memory;
-use riscv_sandbox::isa::Instruction;
+use riscv_sandbox::machine::{IntegerMachine, simtx::Machine as SIMTX};
 
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::path::PathBuf;
 use std::collections::HashMap;
 use std::env;
 
