@@ -16,25 +16,29 @@ pub struct Machine {
 
 impl Machine {
     pub fn new(plt:HashMap<i32, String>) -> Machine {
-        Machine {
+        let mut ret = Machine {
             cores : [ RV32I::new(), RV32I::new()
                     , RV32I::new(), RV32I::new() ],
             joining : [ -1 ; 4 ],
             current_core : 0,
-            //threads : vec![ ThreadData { registers: [ 0 ; 31 ], pc: 0 } ],
             active_threads : 1,
             cycles : 0,
             plt_addresses : plt,
+        };
+
+        let mut i = 0;
+        for core in &mut ret.cores {
+            core.set_csr_field(CsrField::HartID, i);
+            i += 1;
         }
+
+        ret
     }
 
     fn schedule_next_core(&mut self) {
         let mut i = (self.current_core + 1) % self.active_threads;
         let mut num = 0;
         while (self.joining[i] != -1 || self.cores[i].get_pc() == 0) && num < self.active_threads {
-            if self.cores[i].get_pc() == 0 {
-                println!("[SIM] !!! core {} finished !!!", i)
-            }
             i = (i + 1) % self.active_threads;
             num += 1
         }

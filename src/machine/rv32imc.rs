@@ -2,7 +2,7 @@ use machine::IntegerMachine;
 use isa::{Instruction, OpCode, CsrId, CsrField};
 use memory::Memory;
 
-/// Represent the data which we need to send to the [write back] step
+/// Represent the data which we need to send to the `write back` step
 #[derive(Debug)]
 pub struct WriteBackData {
     pub perform: bool,
@@ -230,7 +230,8 @@ impl Machine {
                 to_mem.value = curr_pc.wrapping_add(4);
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
-                self.pc = self.get_register(i.get_rs1() as usize).wrapping_add(i.get_imm_i());
+                self.pc = self.get_register(i.get_rs1() as usize)
+                    .wrapping_add(i.get_imm_i());
                 self.if2dc = PipelineState::empty();
                 self.dc2ex = PipelineState::empty()
             },
