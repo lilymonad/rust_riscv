@@ -3,8 +3,9 @@ extern crate riscv_sandbox;
 
 use riscv_sandbox::elf;
 use riscv_sandbox::machine::{IntegerMachine, simtx::Machine as SIMTX};
+use riscv_sandbox::memory::Memory;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::env;
 
 fn main() {
@@ -30,7 +31,7 @@ fn main() {
         .expect("This ELF file has no function named 'main'");
 
     // create some memory buffer to load instructions and rodata
-    let mut memory : HashMap<usize, u32> = HashMap::new();
+    let mut memory = BTreeMap::new();
     assert!(elf::load_instructions(&file, &mut memory)
             , "This ELF file has no .text section");
 
@@ -45,6 +46,10 @@ fn main() {
     machine.set_i_register(1, 0);
     let mut i = 0;
 
+    let nbth = tpw * nb_warps;
+    //memory.allocate_at((-1024 * (nbth as i32)) as usize, 1024 * nbth);
+    memory.allocate_at((-1024i32) as usize, 1024);
+
     // execute the program until its end
     loop {
         machine.cycle(&mut memory);
@@ -55,6 +60,13 @@ fn main() {
         }
     }
 
+    for (key, chunk) in memory.iter() {
+        let mut k = *key;
+        for v in chunk.iter() {
+            println!("{} {}", k, v);
+            k = k.wrapping_add(4)
+        }
+    }
     machine.print_stats();
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register(10));
 }

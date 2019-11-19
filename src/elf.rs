@@ -5,6 +5,9 @@ use memory::Memory;
 pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> bool {
     file.get_section(".text").map_or(false, | text | -> bool {
         let mut i = 0;
+
+        mem.allocate_at(text.shdr.addr as usize, text.data.len());
+
         while i < text.data.len() {
             let x = if file.ehdr.data == elflib::types::ELFDATA2LSB {
                 u32::from_le(text.data.get_32(i))
@@ -26,6 +29,8 @@ pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> bool {
 pub fn load_rodata(file:&elflib::File, mem:&mut dyn Memory) -> bool {
     file.get_section(".rodata").map_or(false, | section | -> bool {
         let mut rodata_i = section.shdr.addr as usize;
+
+        mem.allocate_at(rodata_i, section.data.len());
         for byte in &section.data {
             mem.set_8(rodata_i, *byte);
             rodata_i += 1

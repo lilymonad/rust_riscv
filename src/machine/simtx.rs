@@ -498,12 +498,14 @@ impl IntegerMachine for Machine {
                         let tid = self.pop_first_idle();
                         let w = tid / tpw; let t = tid % tpw;
 
+                        mem.allocate_at((-1024i32 * (tid+1) as i32) as usize, 1024);
+
                         let cid = self.warps[wid].get_single_core_id();
                         // write in memory the tid
                         mem.set_32(self.warps[wid].cores[cid].registers[10] as usize, tid as u32);
 
                         // setup allocated core's register file
-                        let mut regs = [0;32]; let stackoff = (-1024) * tid as i32;
+                        let mut regs = [0;32]; let stackoff = (-1024) * (tid as i32);
                         regs[2] = stackoff;
                         regs[8] = stackoff;
                         self.warps[w].cores[t].registers = regs;
@@ -577,13 +579,6 @@ impl IntegerMachine for Machine {
             } else {
                 self.warps[wid].execute(mem)
             }
-/*
-            for i in self.warps[wid].alive_cores_ids() {
-                if self.warps[wid].cores[i].registers[2] == ((i as i32) *(-1024)) {
-                    self.finished.set(i, true);
-                }
-            }
-*/
         }
     }
 

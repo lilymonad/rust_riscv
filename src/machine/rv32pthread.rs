@@ -35,6 +35,27 @@ impl Machine {
         ret
     }
 
+    pub fn with_args(plt:HashMap<i32, String>,args:Vec<&str>,mem:&mut dyn Memory) -> Machine {
+        let mut machine = Self::new(plt);
+        let core = &mut machine.cores[0];
+
+        core.set_i_register(10, args.len() as i32);
+        core.set_i_register(11, -65536);
+        
+        let mut table_i = (-65536i32) as usize;
+        let mut i = table_i + (4 * args.len());
+        for arg in args {
+            mem.set_32(table_i, i as u32);
+            for byte in arg.bytes() {
+                mem.set_8(i as usize, byte as u8);
+                i += 1;
+            }
+            table_i += 4
+        }
+
+        machine
+    }
+
     fn schedule_next_core(&mut self) {
         let mut i = (self.current_core + 1) % self.active_threads;
         let mut num = 0;
@@ -69,6 +90,9 @@ impl Machine {
                     self.active_threads += 1;
                     self.cores[i].set_pc(npc);
                     self.cores[i].set_i_register(1, 0);
+
+                    mem.allocate_at(((-1024i32) * (i+1) as i32) as usize, 1024);
+
                     self.cores[i].set_i_register(2, (-1024) * i as i32);
                     self.cores[i].set_i_register(8, (-1024) * i as i32);
 
@@ -98,6 +122,17 @@ impl Machine {
                         str_addr += 1
                     }
                     println!("{}", s)
+                }
+                else if func_name.contains("GOMP_parallel") {
+                    
+                }
+                else if func_name.contains("omp_get_num_threads") {
+                    let core = &mut self.cores[curr];
+                    core.set_i_register(10, 4);
+                }
+                else if func_name.contains("omp_get_thread_num") {
+                    let core = &mut self.cores[curr];
+                    core.set_i_register(10, curr as i32);
                 }
 
                 self.cores[self.current_core].ex2mem = rv32imc::MemData {

@@ -3,7 +3,7 @@ extern crate riscv_sandbox;
 
 use riscv_sandbox::elf;
 use riscv_sandbox::machine::{IntegerMachine, rv32pthread::Machine};
-
+use riscv_sandbox::memory::Memory;
 use std::collections::HashMap;
 use std::env;
 
@@ -29,6 +29,8 @@ fn main() {
     if !elf::load_rodata(&file, &mut memory) {
             println!("This ELF file has no .rodata section");
     }
+
+    memory.allocate_at((-1024i32) as usize, 1024);
 
     // create the machine and set it up
     let mut machine = Machine::new(calls);

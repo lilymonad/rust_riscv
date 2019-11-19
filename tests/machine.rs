@@ -9,7 +9,7 @@ use riscv_sandbox::machine::{rv32imc::Machine as RV32I
 use riscv_sandbox::isa::{Instruction, OpCode};
 use riscv_sandbox::elf;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 use std::fs::{self, *};
 use std::io::{BufReader, BufRead};
@@ -163,7 +163,7 @@ fn real_world_tests_simtx() {
             .expect("This ELF file has no function named 'main'");
 
         // create some memory buffer to load instructions and rodata
-        let mut memory : HashMap<usize, u32> = HashMap::new();
+        let mut memory= BTreeMap::new();
         assert!(elf::load_instructions(&file, &mut memory)
                 , "This ELF file has no .text section");
 
@@ -176,6 +176,9 @@ fn real_world_tests_simtx() {
         println!("setting pc to 0x{:x}", pc as usize);
         machine.set_pc(pc);
         machine.set_i_register(1, 0);
+
+        //memory.allocate_at((-1024*4*4) as usize, 1024 * 4 * 4);
+        memory.allocate_at((-1024i32) as usize, 1024);
 
         // execute the program until its end
         loop {
@@ -197,8 +200,7 @@ fn real_world_tests_simtx() {
                 let value : u32 = linebuf.next().and_then(|s| s.parse().ok())
                     .expect("Snapshot bad format");
 
-                memory.get(&key).map(|v| assert_eq!(*v, value))
-                    .expect("Address should be set");
+                assert_eq!(memory.get_32(key), value.to_be());
             }
         }
     }
