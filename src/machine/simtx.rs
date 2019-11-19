@@ -2,6 +2,7 @@ use machine::IntegerMachine;
 use isa::{CsrField, Instruction, OpCode};
 use memory::*;
 use bitvec::vec::BitVec;
+use types::MachineInteger;
 
 use std::fmt;
 
@@ -328,6 +329,14 @@ impl Warp {
                     let dst = inst.get_rd() as usize;
                     let v1 = core.registers[inst.get_rs1() as usize];
                     let v2 = core.registers[inst.get_rs2() as usize];
+                    let uv1 = v1 as u32;
+                    let uv2 = v2 as u32;
+                    let v1_64 = v1 as i64;
+                    let v2_64 = v2 as i64;
+                    let uv1_64 = uv1 as u64;
+                    let uv2_64 = uv2 as u64;
+
+                    let allset = i32::all_set();
 
                     core.registers[dst] = match inst.get_funct7() {
                         0b0000000 => match inst.get_funct3() {
@@ -342,7 +351,15 @@ impl Warp {
                             _ => 0, // Cannot be here, because funct3 is on 3 bits
                         },
                         0b0000001 => match inst.get_funct3() {
-                            _ => 0, // TODO handle M extension (mul/div)
+                            0b000 => v1 * v2,
+                            0b001 => ((v1_64 * v2_64) >> 32) as i32,
+                            0b010 => ((v1_64 * (uv2_64 as i64)) >> 32) as i32,
+                            0b011 => ((uv1_64 * uv2_64) >> 32) as i32,
+                            0b100 => if v2 == 0 { allset } else { v1 / v2 }, // DIV
+                            0b101 => if v2 == 0 { allset } else { (uv1 / uv2) as i32 }, // DIVU
+                            0b110 => if v2 == 0 { v1 } else { v1 % v2 }, // REM
+                            0b111 => if v2 == 0 { v1 } else { (uv1 % uv2) as i32 }, // REMU
+                            _ => 0,
                         },
                         0b0100000 => match inst.get_funct3() {
                             0b000 => v1.wrapping_sub(v2),
