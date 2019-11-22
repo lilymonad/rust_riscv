@@ -11,6 +11,7 @@ pub mod simtx;
 use memory::Memory;
 use types::MachineInteger;
 use isa::{CsrId, CsrField};
+use std::sync::{Arc, Mutex};
 
 /// This trait represent the minimal implementation of a RISC-V Machine.
 /// It needs to give access to integer registers and CSR registers.
@@ -390,3 +391,29 @@ pub trait IntegerMachine {
     }
 }
 
+pub trait MultiCoreIMachine {
+    type IntegerType : MachineInteger;
+
+    /// A single step of the machine. The only thing you should try to verify with
+    /// your implementation is the cycle counter incrementation between calls to
+    ///
+    /// `MultiCoreMachine::step()`
+    ///
+    /// One of the cores of the machine must advance at least by one cycle.
+    ///
+    /// Though the single core traits only need only a mutable reference to the
+    /// memory, multi-cores ones uses a `Arc<Mutex<Memory>>` reference. This 
+    /// helps creating a multi-threaded version of the step function.
+    fn step(&mut self, memory:Arc<Mutex<dyn Memory>>);
+ 
+    fn get_i_register_of(&self, coreid:usize, id:usize) -> Self::IntegerType;
+    fn set_i_register_of(&mut self, coreid:usize, id:usize, value:Self::IntegerType);
+
+    fn finished(&self) -> bool;
+
+    /// Same as `IntegerMachine::get_pc()` but core-wise.
+    fn get_pc_of(&self, coreid:usize) -> Self::IntegerType;
+
+    /// Same as `IntegerMachine::set_pc()` but core-wise.
+    fn set_pc_of(&mut self, coreid:usize, value:Self::IntegerType);
+}

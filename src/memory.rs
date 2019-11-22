@@ -156,133 +156,41 @@ impl Memory for HashMap<usize, u32> {
     }
 }
 
-enum SearchRes {
-    Fusion(usize, Vec<usize>),
-    Fail,
-}
-
-fn overlap(aleft:usize,aright:usize,bleft:usize,bright:usize) -> bool {
-    aleft <= bright && bleft <= aright
-}
-
-impl Memory for BTreeMap<usize, Vec<u32> > {
+impl Memory for BTreeMap<usize, [u8;4096] > {
     fn get_8(&self, addr:usize) -> u8 {
-        for (start, chunk) in self {
-            let end = start.wrapping_add(chunk.len() * 4);
-            if addr >= *start && (addr < end || end < *start) {
-                return chunk.get_8(addr - start)
-            }
+        let chunk_id = addr / 4096;
+        let byte_offset = addr % 4096;
+        if let Some(chunk) = self.get(&chunk_id) {
+            chunk[byte_offset]
+        } else {
+            panic!("BTreeMap<usize, [u8;4096]>::get_8(0x{:x})", addr)
         }
-
-        panic!("BTreeMap<usize, Vec<u32>>::get_8(0x{:x})", addr)
     }
 
     fn set_8(&mut self, addr:usize, value:u8) {
-        for (start, chunk) in self.iter_mut() {
-            let end = start.wrapping_add(chunk.len() * 4);
-            if addr >= *start && (addr < end || end < *start) {
-                chunk.set_8(addr - start, value);
-                return
-            }
+        let chunk_id = addr / 4096;
+        let byte_offset = addr % 4096;
+        if let Some(chunk) = self.get_mut(&chunk_id) {
+            chunk[byte_offset] = value
+        } else {
+            panic!("BTreeMap<usize, [u8;4096]>::set_8(0x{:x}, {})", addr, value)
         }
-
-        panic!("BTreeMap<usize, Vec<u32>>::set_8(0x{:x}, {})", addr, value)
     }
 
     fn allocate_at(&mut self, start:usize, size:usize) -> bool {
+        let mut allocated = 0;
+        let mut current_id = start / 4096;
+        while allocated < size {
+            
+            if !self.contains_key(&current_id) {
+                self.insert(current_id, [0;4096]);
+            }
 
-        println!("allocate_at(0x{:x}, 0x{:x})", start, size);
-
-        // Check whether we are overflowing the `usize` range
-        let start = start - (start % 4);
-        let size = size + (start % 4);
-        let (wrapped_end, overflow) = start.overflowing_add(size);
-        let saturated_end = start.saturating_add(size);
-        if overflow {
-            return self.allocate_at(start, saturated_end - start)
-                && self.allocate_at(0, wrapped_end + 1)
+            current_id = current_id.wrapping_add(1);
+            allocated += 4096
         }
 
-        let mut result = SearchRes::Fail;
-        let mut iter = self.iter_mut();
-
-        let mut iter_res = iter.next();
-        // If we are not overflowing, we check it we are empty
-        if let Some((chunk_addr, _)) = iter_res {
-            // If even the first chunk is far after our new chunk
-            // Just create an empty chunk
-            if *chunk_addr > wrapped_end {
-                let mut chunk = Vec::new();
-                chunk.allocate_at(0, size);
-                self.insert(start, chunk);
-                return true
-            }
-
-            // we need to gather chunks which need to be fusionned
-            let mut fusion_vec = Vec::new();
-            let mut first_chunk_id = start;
-
-            // try gathering chunks [0..]
-            'search: while let Some((chunk_start, chunk)) = iter_res {
-                let current_end = chunk_start.saturating_add(chunk.len() * 4);
-                if overlap(*chunk_start, current_end, start, wrapped_end) {
-                    println!("{:x}-{:x} and {:x}-{:x} overlap",start, wrapped_end, *chunk_start, current_end);
-                    // when we have our first overlapping chunk, we test for
-                    // which chunk comes first
-                    if first_chunk_id > *chunk_start {
-                        first_chunk_id = *chunk_start
-                    } else {
-                        fusion_vec.push(*chunk_start)
-                    }
-
-                    // if we overlap AND overflow, gather every other chunk
-                    if wrapped_end > current_end {
-                        while let Some((next_start, _)) = iter.next() {
-                            if *next_start < wrapped_end {
-                                fusion_vec.push(*next_start);
-                            } else {
-                                break
-                            }
-                        }
-
-                        result = SearchRes::Fusion(first_chunk_id, fusion_vec);
-                        break 'search
-                    }
-                }
-
-                iter_res = iter.next();
-            }
-
-            // If we need to fusion, we need the first chunk to be fusionned
-            // in order to have our first
-            match result {
-                SearchRes::Fusion(id1, ids) => {
-                    if !self.contains_key(&id1) {
-                        self.insert(id1, Vec::new());
-                    }
-                    for id2 in ids.iter() {
-                        let chunk2 = self.get(&id2).unwrap().clone();
-                        let chunk = self.get_mut(&id1).unwrap();
-                        chunk.allocate_at(0, id2 - id1);
-                        chunk.extend(chunk2.iter());
-                        self.remove(&id2);
-                    }
-                    self.get_mut(&id1).unwrap().allocate_at(start - id1, size);
-                },
-                SearchRes::Fail => {
-                    let mut chunk = Vec::with_capacity(size / 4 + 1);
-                    chunk.allocate_at(0, size);
-                    self.insert(start, chunk);
-                },
-            }
-            return true           
-        } else {
-            // If we are empty, we just create the first chunk
-            let mut chunk = Vec::new();
-            chunk.allocate_at(0, size);
-            self.insert(start, chunk);
-            return true
-        }
+        true
     }
 }
 

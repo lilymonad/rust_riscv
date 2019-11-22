@@ -14,6 +14,8 @@ use std::collections::{HashMap, BTreeMap};
 use std::fs::{self, *};
 use std::io::{BufReader, BufRead};
 
+use std::sync::{Arc, Mutex};
+
 #[test]
 fn registers() {
     let mut proc = RV32I::new();
@@ -163,26 +165,29 @@ fn real_world_tests_simtx() {
             .expect("This ELF file has no function named 'main'");
 
         // create some memory buffer to load instructions and rodata
-        let mut memory= BTreeMap::new();
-        assert!(elf::load_instructions(&file, &mut memory)
-                , "This ELF file has no .text section");
+        let memory = Arc::new(Mutex::new(BTreeMap::new()));
 
-        if !elf::load_rodata(&file, &mut memory) {
-                println!("This ELF file has no .rodata section");
+        {
+            let mut memory = memory.lock().unwrap();
+            assert!(elf::load_instructions(&file, &mut *memory)
+                    , "This ELF file has no .text section");
+
+            if !elf::load_rodata(&file, &mut *memory) {
+                    println!("This ELF file has no .rodata section");
+            }
+
+            memory.allocate_at((-1024i32) as usize, 1024);
         }
 
         // create the machine and set it up
         let mut machine = SIMTX::new(4, 4, calls);
         println!("setting pc to 0x{:x}", pc as usize);
-        machine.set_pc(pc);
-        machine.set_i_register(1, 0);
-
-        //memory.allocate_at((-1024*4*4) as usize, 1024 * 4 * 4);
-        memory.allocate_at((-1024i32) as usize, 1024);
+        machine.set_pc_of(0, pc);
+        machine.set_i_register_of(0, 1, 0);
 
         // execute the program until its end
         loop {
-            machine.cycle(&mut memory);
+            machine.step(memory.clone());
 
             if machine.finished() {
                 break;
@@ -200,7 +205,7 @@ fn real_world_tests_simtx() {
                 let value : u32 = linebuf.next().and_then(|s| s.parse().ok())
                     .expect("Snapshot bad format");
 
-                assert_eq!(memory.get_32(key), value.to_be());
+                assert_eq!(memory.lock().unwrap().get_32(key), value.to_be());
             }
         }
     }

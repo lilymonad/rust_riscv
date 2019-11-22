@@ -1,12 +1,14 @@
-use machine::IntegerMachine;
-use isa::{CsrField, Instruction, OpCode};
+use machine::MultiCoreIMachine;
+use isa::{Instruction, OpCode};
 use memory::*;
-use bitvec::vec::BitVec;
-use types::MachineInteger;
-
+use types::{MachineInteger, BitSet};
+use std::sync::{Arc, Mutex};
 use std::fmt;
+use std::ops::DerefMut;
 
 use std::collections::{HashMap, BTreeMap};
+
+type BitVec = u32;
 
 /// Defines the state of a single hardware thread.
 #[derive(Clone)]
@@ -27,12 +29,10 @@ struct Path {
 
 impl Path {
     pub fn from_pc_mask(pc:i32, mask:BitVec) -> Path {
-        let mut waiting = BitVec::new();
-        waiting.resize(mask.len(), false);
         Path {
             fetch_pc: pc,
             execution_mask: mask,
-            waiting_for_sync: waiting,
+            waiting_for_sync: 0,
         }
     }
 
@@ -61,14 +61,12 @@ struct Warp {
 
 impl Warp {
     pub fn new(tpw:usize) -> Warp {
-        let mut cs = Vec::new();
-        cs.resize(tpw, Core { registers : [ 0; 32 ] });
+        let mut cores = Vec::new();
+        cores.resize(tpw, Core { registers : [ 0; 32 ] });
 
-        let ps = Vec::new();
-        
         Warp {
-            cores: cs,
-            paths: ps,
+            cores,
+            paths: Vec::new(),
             current_path: 0,
             branch_mask_hist: HashMap::new(),
         }
@@ -76,7 +74,7 @@ impl Warp {
 
     pub fn get_path_of_core(&self, cid:usize) -> &Path {
         for p in &self.paths {
-            if p.execution_mask[cid] { return p }
+            if p.execution_mask.at(cid) { return p }
         }
 
         panic!("No path");
@@ -85,7 +83,7 @@ impl Warp {
     pub fn get_single_core_id(&mut self) -> usize {
         let mask = &self.paths[self.current_path].execution_mask;
         for i in 0..self.cores.len() {
-            if mask[i] {
+            if mask.at(i) {
                 return i
             }
         }
@@ -131,7 +129,7 @@ impl Warp {
     pub fn for_each_core_alive<T:FnMut(&mut Core)->()>(&mut self, mut f:T) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
-            if path.execution_mask[i] {
+            if path.execution_mask.at(i) {
                 f(&mut self.cores[i]);
             }
         }
@@ -139,13 +137,13 @@ impl Warp {
 
     pub fn alive_cores_ids(&self) -> impl Iterator<Item=usize> {
         let bv = self.paths[self.current_path].execution_mask.clone();
-        (0..self.cores.len()).into_iter().filter(move |i| bv[*i])
+        (0..self.cores.len()).into_iter().filter(move |i| bv.at(*i))
     }
 
     fn for_each_core_alive_i<T:FnMut(usize, &mut Core)->()>(&mut self, mut f:T) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
-            if path.execution_mask[i] {
+            if path.execution_mask.at(i) {
                 f(i, &mut self.cores[i]);
             }
         }
@@ -200,12 +198,9 @@ impl Warp {
                     let new_pc = inst.get_imm_i().
                         wrapping_add(core.registers[inst.get_rs1() as usize]);
                     if let Some(bv) = nph.get_mut(&new_pc) {
-                        bv.set(i, true);
+                        bv.set(i);
                     } else {
-                        let mut bv = BitVec::new();
-                        bv.resize(nth, false);
-                        bv.set(i, true);
-                        nph.insert(new_pc, bv);
+                        nph.insert(new_pc, BitVec::singleton(i));
                     }
                     if inst.get_rd() != 0 {
                         core.registers[inst.get_rd() as usize] = pc.wrapping_add(4);
@@ -230,10 +225,7 @@ impl Warp {
                 let  tpc = pc.wrapping_add(inst.get_imm_b());
                 let ntpc = pc.wrapping_add(4);
 
-                let mut taken_mask = BitVec::new();
-                let mut not_taken_mask = BitVec::new();
-                taken_mask.resize(nth, false);
-                not_taken_mask.resize(nth, false);
+                let mut taken_mask = 0;
 
                 // compute taken/not_taken masks for each alive thread
                 self.for_each_core_alive_i(|i, core| {
@@ -255,9 +247,12 @@ impl Warp {
                         _ => false,
                     };
 
-                    taken_mask.set(i, take);
-                    not_taken_mask.set(i, !take);
+                    if take {
+                        taken_mask.set(i);
+                    }
                 });
+
+                let not_taken_mask = (!taken_mask) & self.paths[self.current_path].execution_mask;
 
                 // update path, and add new paths if divergent
                 if !not_taken_mask.any() {    // uniform taken
@@ -456,7 +451,6 @@ impl Machine {
         let ret = self.heap_ptr;
         self.heap_ptr += size;
 
-        println!("malloc(0x{:x}) returned 0x{:x}", size, ret);
         ret
     }
 
@@ -493,15 +487,15 @@ impl Machine {
             for pid in 0..warp.paths.len() {
                 let pc = warp.paths[pid].fetch_pc;
                 let mask = warp.paths[pid].execution_mask.clone();
-                let mut bv_cont = BitVec::new(); bv_cont.resize(tpw, false);
-                let mut bv_barr = BitVec::new(); bv_barr.resize(tpw, false);
-                for cid in (0..tpw).filter(|i| mask[*i]) {
+                let mut bv_cont = 0;
+                let mut bv_barr = 0;
+                for cid in (0..tpw).filter(|i| mask.at(*i)) {
                     let tid = wid * tpw + cid;
                     if self.in_barrier[tid] == barr {
                         self.in_barrier[tid] = 0;
-                        bv_cont.set(cid, true);
+                        bv_cont.set(cid);
                     } else {
-                        bv_barr.set(cid, true);
+                        bv_barr.set(cid);
                     }
                 }
 
@@ -518,10 +512,11 @@ impl Machine {
     }
 }
 
-impl IntegerMachine for Machine {
+impl MultiCoreIMachine for Machine {
     type IntegerType = i32;
 
-    fn cycle(&mut self, mem:&mut dyn Memory) {
+    fn step(&mut self, mem:Arc<Mutex<dyn Memory>>) {
+        let mut mem = mem.lock().unwrap();
         let tpw = self.warps[0].cores.len();
 
         for wid in 0..self.warps.len() {
@@ -561,8 +556,7 @@ impl IntegerMachine for Machine {
 
                         // setup a new path with only allocated thread inside
                         let npc = self.warps[wid].cores[cid].registers[12];
-                        let mut m = BitVec::new(); m.resize(tpw, false);
-                        m.set(t, true);
+                        let m = BitSet::singleton(t);
 
                         self.warps[w].paths.push(Path::from_pc_mask(npc, m));
 
@@ -625,7 +619,7 @@ impl IntegerMachine for Machine {
                     } else if func_name.contains("malloc") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let size = self.warps[wid].cores[i].registers[10];
-                            let ptr = self.malloc(mem, size as usize);
+                            let ptr = self.malloc(mem.deref_mut(), size as usize);
                             self.warps[wid].cores[i].registers[10] = ptr as i32;
                         }
                         self.warps[wid].paths[pathid].fetch_pc += 4;
@@ -653,52 +647,60 @@ impl IntegerMachine for Machine {
                         self.warps[wid].paths[pathid].fetch_pc += 4;
                     }
                 } else {
-                    self.warps[wid].execute(mem)
+                    self.warps[wid].execute(mem.deref_mut())
                 }
             } else {
-                self.warps[wid].execute(mem)
+                self.warps[wid].execute(mem.deref_mut())
             }
         }
     }
 
-    fn get_i_register(&self, id:usize) -> i32 {
-        return self.warps[0].cores[0].registers[id]
+    fn get_i_register_of(&self, coreid:usize, id:usize) -> i32 {
+        let tpw = self.warps[0].cores.len();
+        let wid = coreid / tpw;
+        let cid = coreid % tpw;
+        return self.warps[wid].cores[cid].registers[id]
     }
 
-    fn set_i_register(&mut self, _id:usize, _value:i32) {
+    fn set_i_register_of(&mut self, coreid:usize, id:usize, value:i32) {
+        let tpw = self.warps[0].cores.len();
+        let wid = coreid / tpw;
+        let cid = coreid % tpw;
+        self.warps[wid].cores[cid].registers[id] = value
     }
 
-    fn get_pc(&self) -> i32 {
-        for path in &self.warps[0].paths {
-            if path.execution_mask[0] {
+    fn get_pc_of(&self, coreid:usize) -> i32 {
+        let tpw = self.warps[0].cores.len();
+        let wid = coreid / tpw;
+        let cid = coreid % tpw;
+
+        for path in &self.warps[wid].paths {
+            if path.execution_mask.at(cid) {
                 return path.fetch_pc
             }
         }
 
-        panic!("No path in warp 0")
+        0
     }
 
-    fn set_pc(&mut self, value:i32) {
-        if self.warps[0].paths.is_empty() {
-            let th = self.pop_first_idle();
-            let mut m = BitVec::new(); m.resize(self.warps[0].cores.len(), false);
-            m.set(th, true);
-            self.warps[0].paths.push(Path::from_pc_mask(value, m));
+    fn set_pc_of(&mut self, coreid:usize, value:i32) {
+        let tpw = self.warps[0].cores.len();
+        let wid = coreid / tpw;
+        let cid = coreid % tpw;
+        for pid in 0..self.warps[wid].paths.len() {
+            let ex = &self.warps[wid].paths[pid].execution_mask;
+            if ex.at(cid) {
+                let new_mask : BitVec = BitSet::singleton(cid);
+                let modified_mask = ex & !new_mask;
+
+                self.warps[wid].paths.push(Path::from_pc_mask(value, new_mask));
+                self.warps[wid].paths[pid].execution_mask = modified_mask;
+                return
+            }
         }
-    }
 
-    fn get_privilege(&self) -> u8 {
-        0
-    }
-
-    fn set_privilege(&mut self, _value:u8) {
-    }
-
-    fn get_csr_field(&self, _field:CsrField) -> i32 {
-        0
-    }
-
-    fn set_csr_field(&mut self, _field:CsrField, _value:i32) {
+        self.idle_threads.remove_item(&coreid);
+        self.warps[wid].paths.push(Path::from_pc_mask(value, BitSet::singleton(cid)));
     }
 
     fn finished(&self) -> bool {

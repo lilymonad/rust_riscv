@@ -7,4 +7,3 @@ license = "MIT"
 
 [dependencies]
 elf = "^0.0.10"
-bitvec = "^0.15.2"

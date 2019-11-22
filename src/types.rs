@@ -49,3 +49,54 @@ impl MachineInteger for i128 {
 
     fn all_set() -> Self { -1 }
 }
+
+pub trait MachineFloat
+: Sized +
+  Copy +
+  Clone +
+  PartialEq +
+  From<f32>
+{
+    const FLEN : u32;
+}
+
+impl MachineFloat for f32 {
+    const FLEN :u32 = 32;
+}
+impl MachineFloat for f64 {
+    const FLEN : u32 = 64;
+}
+
+pub trait BitSet {
+    fn set(&mut self, id:usize);
+    fn unset(&mut self, id:usize);
+    fn at(&self, id:usize) -> bool;
+    fn singleton(id:usize) -> Self;
+    fn any(&self) -> bool;
+    fn none(&self) -> bool;
+}
+
+impl BitSet for u32 {
+    fn set(&mut self, id:usize) { *self |= 1 << id }
+    fn unset(&mut self, id:usize) { *self &= !(1 << id) }
+    fn at(&self, id:usize) -> bool { (*self & (1 << id)) != 0 }
+    fn singleton(id:usize) -> Self { 1 << id }
+    fn any(&self) -> bool { *self != 0 }
+    fn none(&self) -> bool { *self == 0 }
+}
+impl BitSet for u64 {
+    fn set(&mut self, id:usize) { *self |= 1 << id }
+    fn unset(&mut self, id:usize) { *self &= !(1 << id) }
+    fn at(&self, id:usize) -> bool { (*self & (1 << id)) != 0 }
+    fn singleton(id:usize) -> Self { 1 << id }
+    fn any(&self) -> bool { *self != 0 }
+    fn none(&self) -> bool { *self == 0 }
+}
+impl BitSet for u128 {
+    fn set(&mut self, id:usize) { *self |= 1 << id }
+    fn unset(&mut self, id:usize) { *self &= !(1 << id) }
+    fn at(&self, id:usize) -> bool { (*self & (1 << id)) != 0 }
+    fn singleton(id:usize) -> Self { 1 << id }
+    fn any(&self) -> bool { *self != 0 }
+    fn none(&self) -> bool { *self == 0 }
+}
