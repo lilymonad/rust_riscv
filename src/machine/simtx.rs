@@ -6,7 +6,7 @@ use types::MachineInteger;
 
 use std::fmt;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 /// Defines the state of a single hardware thread.
 #[derive(Clone)]
@@ -413,6 +413,8 @@ pub struct Machine {
     idle_threads:Vec<usize>,
     barriers:HashMap<i32, Barrier>,
     in_barrier:Vec<i32>,
+    heap_ptr:usize,
+    heap_elements:BTreeMap<usize, (usize, bool)>,
 }
 
 impl Machine {
@@ -434,11 +436,41 @@ impl Machine {
             idle_threads,
             barriers:HashMap::new(),
             in_barrier,
+            heap_ptr:0x10000000,
+            heap_elements:BTreeMap::new(),
         }
+    }
+
+    fn malloc(&mut self, mem:&mut dyn Memory, size:usize) -> usize {
+        mem.allocate_at(self.heap_ptr, size);
+
+        for (ptr, (chunk_size, used)) in &mut self.heap_elements {
+            if !(*used) && *chunk_size < size {
+                *used = true;
+                return *ptr
+            }
+        }
+
+        self.heap_elements.insert(self.heap_ptr, (size, true));
+
+        let ret = self.heap_ptr;
+        self.heap_ptr += size;
+
+        println!("malloc(0x{:x}) returned 0x{:x}", size, ret);
+        ret
+    }
+
+    fn free(&mut self, ptr:usize) {
+        self.heap_elements.get_mut(&ptr)
+            .expect("Free unalocated pointer").1 = false;
     }
 
     fn pop_first_idle(&mut self) -> usize {
         self.idle_threads.pop().expect("No more threads")
+    }
+
+    fn push_idle(&mut self, thread:usize) {
+        self.idle_threads.push(thread)
     }
 
     pub fn print_stats(&self) {
@@ -545,6 +577,7 @@ impl IntegerMachine for Machine {
 
                         if self.warps[w_to_wait].get_path_of_core(c_to_wait).fetch_pc == 0 {
                             self.warps[wid].paths[pathid].fetch_pc += 4;
+                            self.push_idle(to_wait);
                         }
                     } else if func_name.contains("pthread_barrier_init") {
                         let cid = self.warps[wid].get_single_core_id();
@@ -587,6 +620,35 @@ impl IntegerMachine for Machine {
                         for i in self.warps[wid].alive_cores_ids() {
                             let tid = i + wid*tpw;
                             println!("Core #{} [puts]", tid);
+                        }
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    } else if func_name.contains("malloc") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let size = self.warps[wid].cores[i].registers[10];
+                            let ptr = self.malloc(mem, size as usize);
+                            self.warps[wid].cores[i].registers[10] = ptr as i32;
+                        }
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    } else if func_name.contains("free") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let ptr = self.warps[wid].cores[i].registers[10];
+                            self.free(ptr as usize);
+                        }
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    } else if func_name.contains("GOMP_parallel") {
+                        
+                    } else if func_name.contains("omp_get_num_threads") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let num_warps = self.warps.len();
+                            let core = &mut self.warps[wid].cores[i];
+                            core.registers[10] = (num_warps * tpw) as i32;
+                        }
+                        self.warps[wid].paths[pathid].fetch_pc += 4;
+                    } else if func_name.contains("omp_get_thread_num") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let core = &mut self.warps[wid].cores[i];
+                            let tid = wid*tpw + i;
+                            core.registers[10] = tid as i32;
                         }
                         self.warps[wid].paths[pathid].fetch_pc += 4;
                     }

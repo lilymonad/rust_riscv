@@ -191,6 +191,8 @@ impl Memory for BTreeMap<usize, Vec<u32> > {
 
     fn allocate_at(&mut self, start:usize, size:usize) -> bool {
 
+        println!("allocate_at(0x{:x}, 0x{:x})", start, size);
+
         // Check whether we are overflowing the `usize` range
         let start = start - (start % 4);
         let size = size + (start % 4);
@@ -198,7 +200,7 @@ impl Memory for BTreeMap<usize, Vec<u32> > {
         let saturated_end = start.saturating_add(size);
         if overflow {
             return self.allocate_at(start, saturated_end - start)
-                && self.allocate_at(0, wrapped_end)
+                && self.allocate_at(0, wrapped_end + 1)
         }
 
         let mut result = SearchRes::Fail;
