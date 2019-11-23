@@ -9,6 +9,7 @@ use std::ops::DerefMut;
 use std::collections::{HashMap, BTreeMap};
 
 type BitVec = u32;
+pub static MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
 
 /// Defines the state of a single hardware thread.
 #[derive(Clone)]
@@ -414,6 +415,8 @@ pub struct Machine {
 
 impl Machine {
     pub fn new(tpw:usize, nb_warps:usize, plt_addresses:HashMap<i32, String>) -> Machine {
+
+        if tpw > MAX_TPW { panic!("This version of SIMTX is compiled with MAX_TPW={}", MAX_TPW) }
         let mut warps = Vec::new();
         warps.resize(nb_warps, Warp::new(tpw));
 

@@ -5,7 +5,8 @@ use riscv_sandbox::memory::Memory;
 use riscv_sandbox::machine::{rv32imc::Machine as RV32I
     //, rv32pthread::Machine as RV32Threaded
     , simtx::Machine as SIMTX
-    , *};
+    , *
+    , self};
 use riscv_sandbox::isa::{Instruction, OpCode};
 use riscv_sandbox::elf;
 
@@ -209,4 +210,10 @@ fn real_world_tests_simtx() {
             }
         }
     }
+}
+
+#[test]
+#[should_panic]
+fn simtx_too_many_tpw() {
+    let machine = SIMTX::new(machine::simtx::MAX_TPW + 1, 1, HashMap::new());
 }
