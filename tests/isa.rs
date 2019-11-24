@@ -156,3 +156,64 @@ fn display_branch() {
     assert_eq!(format!("{}", Instruction::beq(0, 1, 50)), "beq @pc+50 if r0 $ r1");
     assert_eq!(format!("{}", Instruction::bne(4, 2, 512)), "bne @pc+512 if r4 $ r2");
 }
+
+#[test]
+fn nop_works() {
+    assert_eq!(format!("{}", Instruction::nop()), "addi r0 = r0, 0");
+}
+
+#[test]
+fn compressed() {
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x86aa);
+    assert_eq!(
+        Instruction(0x86aa).uncompressed()
+        , Instruction::add(13, 10, 0)); // mv a3,a0
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x041c);
+    assert_eq!(
+        Instruction(0x041c).uncompressed()
+        , Instruction::addi(15, 2, 512)); // addi a5,sp,512
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x47a9);
+    assert_eq!(
+        Instruction(0x47a9).uncompressed()
+        , Instruction::addi(15, 0, 10)); // li a5,10 (implemented with addi)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x8082);
+    assert_eq!(
+        Instruction(0x8082).uncompressed()
+        , Instruction::jalr(0, 1, 0)); // ret (jalr x0 x1 0)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0xb059);
+    assert_eq!(
+        Instruction(0xb059).uncompressed()
+        , Instruction::jal(0, 0x8460 - 0x8bda)); // j 0x8460
+    println!("uncompress : {i:016b} ({i:04x})", i = 0xca26);
+    assert_eq!(
+        Instruction(0xca26).uncompressed()
+        , Instruction::sw(2, 9, 20)); // sw r9,20(r2)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0xcd41);
+    assert_eq!(
+        Instruction(0xcd41).uncompressed()
+        , Instruction::beq(10, 0, 0x8ca8 - 0x8c10)); // beq r10 r0 0x8ca8
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x6709);
+    assert_eq!(
+        Instruction(0x6709).uncompressed()
+        , Instruction::lui(14, 2)); // lui r14 0x2
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x0405);
+    assert_eq!(
+        Instruction(0x0405).uncompressed()
+        , Instruction::addi(8, 8, 1)); // addi r8,r8,1
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x0786);
+    assert_eq!(
+        Instruction(0x0786).uncompressed()
+        , Instruction::slli(15, 15, 1)); // slli r15,r15,1
+    println!("uncompress : {i:016b} ({i:04x})", i = 0xfbe5);
+    assert_eq!(
+        Instruction(0xfbe5).uncompressed()
+        , Instruction::bne(15, 0, 0x8c1e - 0x8c2e)); // bne r15 r0 0x8c1e
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x8ff1);
+    assert_eq!(
+        Instruction(0x8ff1).uncompressed()
+        , Instruction::and(15, 15, 12)); // and r15,r15,r12
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x4462);
+    assert_eq!(
+        Instruction(0x4462).uncompressed()
+        , Instruction::lw(8, 2, 24)); // lw r8,24(r2)
+}
