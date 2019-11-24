@@ -117,8 +117,8 @@ impl Machine {
                     let mut str_addr = self.get_i_register(10) as usize;
                     let mut byte = mem.get_8(str_addr); let mut s = String::new();
                     while byte != 0 {
-                        byte = mem.get_8(str_addr);
                         s.push(byte as char);
+                        byte = mem.get_8(str_addr);
                         str_addr += 1
                     }
                     println!("{}", s)
