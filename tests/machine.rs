@@ -34,10 +34,15 @@ fn registers() {
 
 #[test]
 fn execute_addi() {
-    let mut memory : Vec<u32> = vec![0,0,0,0,0,0,0,0];
+    let mut memory : Vec<u32> = Vec::new();
     let add = Instruction::create_i(OpCode::OPIMM, 1, 1, 0x7FF, 0);
 
-    memory.set_32(0, add.be());
+    memory.push(add.le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
 
     let mut machine = RV32I::new();
 
@@ -75,11 +80,11 @@ fn simple_math() {
     // sub r1 r1 r2 ; r1 = 0x06543212
     memory.push(Instruction::create_r(OpCode::OPREG, 1, 1, 2, 0x100).le());
 
-    memory.push(0);
-    memory.push(0);
-    memory.push(0);
-    memory.push(0);
-    memory.push(0);
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
+    memory.push(Instruction::nop().le());
 
     let mut machine = RV32I::new();
 

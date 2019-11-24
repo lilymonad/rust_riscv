@@ -207,6 +207,8 @@ impl Machine {
         let i = self.dc2ex.instruction;
         let mut illegal = false;
 
+        let (i, advance) = if i.is_compressed() { (i.uncompressed(), 2) } else { (i, 4) };
+
         match i.get_opcode_enum() {
             OpCode::LUI => {
                 to_mem.wb_perform = true;
@@ -237,7 +239,7 @@ impl Machine {
             },
             OpCode::BRANCH => {
                 let  tpc = curr_pc.wrapping_add(i.get_imm_b());
-                let ntpc = curr_pc.wrapping_add(4);
+                let ntpc = curr_pc.wrapping_add(advance);
                 
                 let r1 = i.get_rs1() as usize;
                 let v1 = self.get_register(r1);
@@ -524,18 +526,15 @@ impl Machine {
 
         let ic = Instruction(first);
 
-        let i;
-        let advance : i32;
-        if ic.is_compressed() {
-            i = ic.uncompressed();
-            advance = 2
-        } else {
-            let second = mem.get_16((self.pc + 2) as usize) as u32;
+        let (advance, i) =
+            if ic.is_compressed() {
+                (2, ic)
+            } else {
+                let second = mem.get_16((self.pc + 2) as usize) as u32;
+                (4, Instruction((second << 16) | first))
+            };
 
-            i = Instruction((second << 16) | first);
-            advance = 4
-        }
-
+        println!("fetched {}", i);
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
         self.pc += advance
     }
