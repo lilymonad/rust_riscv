@@ -39,30 +39,8 @@ impl<'a> Memory for &'a mut [u8] {
         self[addr]
     }
 
-    fn get_16(&self, addr:usize) -> u16 {
-        let low = self.get_8(addr) as u16;
-        let high = self.get_8(addr + 1) as u16;
-        (high << 8) | low
-    }
-
-    fn get_32(&self, addr:usize) -> u32 {
-        let low = self.get_16(addr) as u32;
-        let high = self.get_16(addr + 2) as u32;
-        (high << 16) | low
-    }
-
     fn set_8(&mut self, addr:usize, value:u8) {
         self[addr] = value
-    }
-
-    fn set_16(&mut self, addr:usize, value:u16) {
-        self.set_8(addr, (value & 0xFF) as u8);
-        self.set_8(addr + 1, ((value >> 8) & 0xFF) as u8)
-    }
-
-    fn set_32(&mut self, addr:usize, value:u32) {
-        self.set_16(addr, (value & 0xFFFF) as u16);
-        self.set_16(addr + 2, ((value >> 16) & 0xFFFF) as u16)
     }
 
     fn allocate_at(&mut self, _start:usize, _size:usize) -> bool {
@@ -116,7 +94,7 @@ impl Memory for HashMap<usize, u32> {
     fn get_8(&self, addr:usize) -> u8 {
         let addr32 = addr - (addr % 4);
         self.get(&addr32).map_or_else(
-            || panic!("HashMap<usize, u32>::get_8"),
+            || panic!("HashMap<usize, u32>::get_8(0x{:x})", addr),
             
             | x | {
             ((x >> (8 * (3 - addr % 4))) & 0xFF) as u8
@@ -142,11 +120,10 @@ impl Memory for HashMap<usize, u32> {
     }
     
     fn allocate_at(&mut self, start:usize, size:usize) -> bool {
-        let mut norm_start = start;
+        let mut norm_start = start - (start % 4);
         let mut i = 0;
         while i < size {
             if let None = self.get(&norm_start) {
-                println!("inserting 0x{:x}", norm_start);
                 self.insert(norm_start, 0);
             }
             i += 4;
@@ -178,15 +155,16 @@ impl Memory for BTreeMap<usize, [u8;4096] > {
     }
 
     fn allocate_at(&mut self, start:usize, size:usize) -> bool {
-        let mut allocated = 0;
+        let mut allocated : isize = - ((start % 4096) as isize);
         let mut current_id = start / 4096;
-        while allocated < size {
-            
+        while allocated < (size as isize) {
+            //println!("allocate from {:x} to {:x}",
+            //    current_id << 12, (current_id+1) << 12);
             if !self.contains_key(&current_id) {
                 self.insert(current_id, [0;4096]);
             }
 
-            current_id = current_id.wrapping_add(1);
+            current_id = (current_id + 1) % (std::usize::MAX / 4096);
             allocated += 4096
         }
 
