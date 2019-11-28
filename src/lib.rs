@@ -7,7 +7,8 @@
 extern crate elf as elflib;
 extern crate crossbeam;
 
-/// The ISA module containing everything related to instruction format.
+/// The ISA module containing everything related to instruction format, and the
+/// RISC-V CSR specifications.
 pub mod isa;
 
 /// Contains implementations of simple RISC-V machines based on the standard.
@@ -17,10 +18,9 @@ pub mod machine;
 /// Memory interface abstraction used to implement any memory interface you want.
 pub mod memory;
 
-/// Types used for flexibility in simulator's traits datatypes
+/// Types used for flexibility in simulator's traits datatypes.
 pub mod types;
 
-/// Helper functions for elf file reading
+/// Helper functions for elf file reading.
 pub mod elf;
 
-pub use std::thread;

@@ -104,6 +104,11 @@ impl Warp {
         panic!("A path is empty")
     }
 
+    /// This function should be called right before any FETCH step of the `Warp`
+    /// to ensure we always execute a valid path.
+    ///
+    /// This function sets the `current_path` of the `Warp` correcly according
+    /// to the scheduling rule, but also fusion paths with the same PC.
     pub fn schedule_path(&mut self) {
         if self.paths.is_empty() { self.current_path = 0xFFFFFFFF }
         else {
@@ -169,6 +174,8 @@ impl Warp {
         }
     }
 
+    /// This function is a helper used to work on all alive threads of the
+    /// `current_path`.
     pub fn for_each_core_alive<T:FnMut(&mut Core)->()>(&mut self, mut f:T) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
@@ -178,11 +185,7 @@ impl Warp {
         }
     }
 
-    pub fn alive_cores_ids(&self) -> impl Iterator<Item=usize> {
-        let bv = self.paths[self.current_path].execution_mask;
-        (0..self.cores.len()).into_iter().filter(move |i| bv.at(*i))
-    }
-
+    /// Same as `for_each_core_alive()` but with the ID of the core.
     fn for_each_core_alive_i<T:FnMut(usize, &mut Core)->()>(&mut self, mut f:T) {
         let path = &mut self.paths[self.current_path];
         for i in 0..self.cores.len() {
@@ -190,6 +193,12 @@ impl Warp {
                 f(i, &mut self.cores[i]);
             }
         }
+    }
+
+    /// Returns an iterator going through all alive cores IDs in order.
+    pub fn alive_cores_ids(&self) -> impl Iterator<Item=usize> {
+        let bv = self.paths[self.current_path].execution_mask;
+        (0..self.cores.len()).into_iter().filter(move |i| bv.at(*i))
     }
 
     fn update_branch_hist(&mut self, pc:i32, mask:BitVec) {
@@ -200,6 +209,9 @@ impl Warp {
         }
     }
 
+    /// Fully executes an instruction (from Fetch to Commit)
+    /// 
+    /// This operation is NOT cycle accurate. Will be later when needed.
     pub fn execute(&mut self, mem:&mut dyn Memory) {
         if self.current_path == 0xFFFFFFFF { return }
 
@@ -441,7 +453,7 @@ impl fmt::Display for Warp {
     }
 }
 
-/// The barrier type, used to emulate pthread_barrier_* primitives.
+/// The barrier type, used to emulate `pthread_barrier_*` primitives.
 /// As a barrier can be associated with its pointer, when creating a barrier,
 /// we register a Barrier object associated with its pointer.
 ///
@@ -480,7 +492,10 @@ pub struct Machine {
 impl Machine {
     pub fn new(tpw:usize, nb_warps:usize, plt_addresses:HashMap<i32, String>) -> Machine {
 
-        if tpw > MAX_TPW { panic!("This version of SIMTX is compiled with MAX_TPW={}", MAX_TPW) }
+        if tpw > MAX_TPW {
+            panic!("This version of SIMTX is compiled with MAX_TPW={}", MAX_TPW)
+        }
+
         let mut warps = Vec::new();
         warps.resize(nb_warps, Warp::new(tpw));
 
@@ -535,6 +550,9 @@ impl Machine {
         self.idle_threads.push(thread)
     }
 
+    /// Prints the history of execution masks of the branch at address `pc`.
+    /// If the address is not a branch or has never been met, it just prints
+    /// nothing.
     pub fn print_stats_for_pc(&self, pc:usize) {
         for wid in 0..self.warps.len() {
             println!("=== STATS FOR WARP {} AT PC {} ===", wid, pc);
@@ -547,6 +565,9 @@ impl Machine {
         }
     }
 
+    /// Prints for each warps the history of all the branch instructions
+    /// encountered. It also prints information about thhe scheduler and the
+    /// Loop-Detector.
     pub fn print_stats(&self) {
         for wid in 0..self.warps.len() {
             println!("=== STATS FOR WARP {} ===", wid);

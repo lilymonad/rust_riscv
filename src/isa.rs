@@ -380,8 +380,8 @@ impl Instruction {
         one | two | the | fou
     }
 
-    /// This function is mainly used as a helper for the fmt::Display trait
-    /// in order to pretty-print an instruction with println!()
+    /// This function is mainly used as a helper for the `fmt::Display` trait
+    /// in order to pretty-print an instruction with `println!()`
     pub fn get_mnemonic(&self) -> &str {
         match self.get_opcode_enum() {
             OpCode::LUI => "lui",
@@ -427,7 +427,10 @@ impl Instruction {
     }
 
     /// Translates a C instruction into a RV32 one, useful for machines that
-    /// want to implement C extension by only implementing the RV32 base
+    /// want to implement C extension by only implementing the RV32 base.
+    ///
+    /// It is also very useful as many (almost all) helper functions of the
+    /// `Instruction` structure only work on `uncompressed` format.
     // TODO: debug it
     pub fn uncompressed(&self) -> Instruction {
         match self.get_opcode() & 0b11 {
@@ -539,6 +542,8 @@ impl Instruction {
         }
     }
 
+    /// Computes whether an instruction is a jump or not.
+    /// This function can only be used with `uncompressed` instructions.
     pub fn is_jump(&self) -> bool {
         match self.get_opcode_enum() {
             OpCode::JAL | OpCode::JALR | OpCode::BRANCH => true,
@@ -546,7 +551,11 @@ impl Instruction {
         }
     }
 
-    pub fn jump_offset(&self) -> i32 {
+    /// Computes the offset of a jump. Mostly used to know if we are going
+    /// backward. If a jump is backward, we know it is part of a loop or a
+    /// recursive call. Very useful for SIMTX as it wants to understand where
+    /// loops are in order to optimize its scheduling algorithm.
+    pub fn jump_offset(&self, ) -> i32 {
         match self.get_opcode_enum() {
             OpCode::JAL => self.get_imm_j(),
             OpCode::BRANCH => self.get_imm_b(),
@@ -715,10 +724,11 @@ impl Into<u8> for OpCode {
 /// handlers ...), or know about its state (e.g. available extensions
 /// , performances counters ...).
 ///
-/// You can match any CsrId with its implemented constants. This structure helps
-/// representing a CSR ID as what it really is in hardware (12bits number) and
-/// adds some helper functions to easily get privilege the R/W permissions and
-/// privilege level of the indexed register.
+/// You can match any CsrId with its implemented constants by transforming it
+/// with the `as` keyword. This structure helps representing a CSR ID as what
+/// it really is in hardware (12bits number) and adds some helper functions to
+/// easily get privilege the R/W permissions and privilege level of the indexed
+/// register.
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum CsrId {
     USTATUS = 0x000,
@@ -984,10 +994,14 @@ pub enum CsrId {
 }
 
 impl CsrId {
+    /// 2 bits representing whether it is read/write, or read only.
+    /// `11` for read only, all other combination for read/write.
     pub fn mode(&self) -> u8 {
         ((*self as u16) >> 10) as u8
     }
 
+    /// The lowest privilege level at which the CSR can be accessed (See
+    /// [RISC-V Instruction Set Manual Volume II: Privileged Architecture](https://riscv.org/specifications/privileged-isa/))
     pub fn level(&self) -> u8 {
         (((*self as u16) >> 8) & 0b11) as u8
     }
@@ -1238,7 +1252,7 @@ impl From<u16> for CsrId {
 }
 
 /// An enum representing every CSR fields (slices of CSR). It is used to access
-/// every CSR field individually in order to check their type (RW/RO/WARL/WLRL)
+/// every CSR field individually in order to check their type (`RW/RO/WARL/WLRL`)
 pub enum CsrField {
     Bank, Offset, // mvendorid
     ArchitectureID, // marchid
@@ -1269,14 +1283,17 @@ pub enum CsrField {
 
 /// CSR field read/write type
 ///
-/// * `RW`: Can be read and written freely
-/// * `RO`: Can be read but not written
-/// * `WARL`: (Write Any Read Legal) Can write any value to the register, even
-///           illegal ones. The register is assured to return legal values when read.
-/// * `WLRL`: (Write Legal Read Legal) Can write only legal values in the register
-///           if an illegal value is written, you can't expect legal value to be read.
 pub enum CsrFieldType {
-    RW, RO, WARL, WLRL,
+    /// Can be read and written freely
+    RW,
+    /// Can be read but not written
+    RO,
+    /// (Write Any Read Legal) Can write any value to the register, even
+    /// illegal ones. The register is assured to return legal values when read.
+    WARL,
+    /// (Write Legal Read Legal) Can write only legal values in the register
+    /// if an illegal value is written, you can't expect legal value to be read.
+    WLRL,
 }
 
 impl CsrField {
