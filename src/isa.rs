@@ -281,27 +281,32 @@ impl Instruction {
     }
 
     pub fn get_cmem_imm(&self) -> i32 {
-        let deuxsept = (self.0 >> 6) & 0b1;
-        let six = (self.0 >> 5) & 0b1;
-        (((self.0 & 0x1E00) >> 7) | (deuxsept << 2) | (six << 6)) as i32
+        let deux = (self.0 >> 4)      & 0b0000100;
+        let troiscinq = (self.0 >> 7) & 0b0111000;
+        let six = (self.0 << 1)       & 0b1000000;
+        (deux | troiscinq | six) as i32
     }
 
     pub fn get_cs_rs2(&self) -> u8 {
-        self.get_cl_rd()
+        ((self.0 & 0x007E) >> 2) as u8
     }
 
     pub fn get_c_nzr(&self) -> u8 {
-        (self.0 >> 7) as u8
+        ((self.0 >> 7) & 0x1F) as u8
     }
 
     pub fn get_c_nzimm_0_5(&self) -> i32 {
-        let num = (((self.0 >> 7) & 0b100000) | ((self.0 >> 2) & 0b11111)) as i16;
-        ((num << 11) >> 11) as i32
+        let num = (((self.0 >> 7) & 0b100000) | ((self.0 >> 2) & 0b011111)) as i16;
+        ((num << 10) >> 10) as i32
     }
 
-    // TODO: Implement
     pub fn get_c_nzimm_4_9(&self) -> i32 {
-        0
+        let quatre = (self.0 >> 2)   & 0b0000010000;
+        let cinq = (self.0 << 3)     & 0b0000100000;
+        let six = (self.0 << 1)      & 0b0001000000;
+        let septhuit = (self.0 << 4) & 0b0110000000;
+        let neuf = (self.0 >> 3)     & 0b1000000000;
+        ((((quatre | cinq | six | septhuit | neuf) as i16) << 6) >> 6) as i32
     }
 
     pub fn get_c_nzimm_12_17(&self) -> i32 {
@@ -430,7 +435,7 @@ impl Instruction {
                 match self.get_c_func3() {
                     0b000 => { Instruction::slli(self.get_c_nzr(), self.get_c_nzr(), self.get_c_nzimm_0_5()) },
                     0b010 => { Instruction::lw(self.get_c_nzr(), 2, self.get_clwsp_imm()) },
-                    0b110 => { Instruction::sw(2, self.get_cs_rs2() + 8, self.get_cswsp_imm()) },
+                    0b110 => { Instruction::sw(2, self.get_cs_rs2(), self.get_cswsp_imm()) },
                     0b100 => {
                         let code = self.get_c_nzimm_0_5();
                         let rsrd = self.get_c_nzr();
@@ -439,13 +444,13 @@ impl Instruction {
                             if rs2 == 0 { // 00
                                 Instruction::jalr(0, rsrd, 0) // ret
                             } else { // 01
-                                Instruction::add(rsrd, rs2 + 8, 0) // mv
+                                Instruction::add(rsrd, rs2, 0) // mv
                             }
                         } else {
                             if rs2 == 0 { // 10
                                 Instruction::jalr(1, rsrd, 0) // jalr reg
                             } else { // 11
-                                Instruction::add(rsrd, rsrd, rs2 + 8) // add
+                                Instruction::add(rsrd, rsrd, rs2) // add
                             }
                         }
                     },
@@ -475,16 +480,16 @@ impl Instruction {
                         let imm1217 = self.get_c_nzimm_12_17();
                         let imm49 = self.get_c_nzimm_4_9();
                         if r == 2 {
-                            Instruction::addi(r + 8, 2, imm1217)
+                            Instruction::addi(r, r, imm49)
                         } else {
-                            Instruction::lui(r, imm49)
+                            Instruction::lui(r, imm1217)
                         }
                     },
                     0b100 => {
                         let code = (self.get_c_nzr() >> 3) & 0b11;
                         let r = self.get_c_nzr() & 0b111 + 8;
                         let nzimm = self.get_c_nzimm_0_5();
-                        let rs2 = self.get_cs_rs2() + 8;
+                        let rs2 = self.get_cl_rd() + 8;
                         let alucode = (nzimm >> 2) & 0b11;
                         match code {
                             0b00 => { Instruction::srli(r, r, nzimm) },
@@ -522,7 +527,7 @@ impl Instruction {
                     },
                     0b110 => {
                         let r1 = self.get_cmem_rs1();
-                        let r2 = self.get_cs_rs2();
+                        let r2 = self.get_cl_rd();
                         let imm = self.get_cmem_imm();
 
                         Instruction::sw(r1 + 8, r2 + 8, imm as i32)
@@ -531,6 +536,21 @@ impl Instruction {
                 }
             },
             _ => Instruction::nop(),
+        }
+    }
+
+    pub fn is_jump(&self) -> bool {
+        match self.get_opcode_enum() {
+            OpCode::JAL | OpCode::JALR | OpCode::BRANCH => true,
+            _ => false,
+        }
+    }
+
+    pub fn jump_offset(&self) -> i32 {
+        match self.get_opcode_enum() {
+            OpCode::JAL => self.get_imm_j(),
+            OpCode::BRANCH => self.get_imm_b(),
+            _ => 0,
         }
     }
 

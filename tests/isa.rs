@@ -195,7 +195,7 @@ fn compressed() {
     println!("uncompress : {i:016b} ({i:04x})", i = 0x6709);
     assert_eq!(
         Instruction(0x6709).uncompressed()
-        , Instruction::lui(14, 2)); // lui r14 0x2
+        , Instruction::lui(14, 2 << 12)); // lui r14 0x2
     println!("uncompress : {i:016b} ({i:04x})", i = 0x0405);
     assert_eq!(
         Instruction(0x0405).uncompressed()
@@ -216,4 +216,65 @@ fn compressed() {
     assert_eq!(
         Instruction(0x4462).uncompressed()
         , Instruction::lw(8, 2, 24)); // lw r8,24(r2)
+
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x1101);
+    assert_eq!(
+        Instruction(0x1101).uncompressed()
+        , Instruction::addi(2, 2, -32)); // addi 2,2,-32
+    println!("uncompress : {i:016b} ({i:04x})", i = 0xcc22);
+    assert_eq!(
+        Instruction(0xcc22).uncompressed()
+        , Instruction::sw(2, 8, 24)); // sw s0,24(sp)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x6441);
+    assert_eq!(
+        Instruction(0x6441).uncompressed()
+        , Instruction::lui(8, 0x10 << 12)); // lui s0,
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x8522);
+    assert_eq!(
+        Instruction(0x8522).uncompressed()
+        , Instruction::add(10,8,0)); // lui s0,0x100x10
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x7171);
+    assert_eq!(
+        Instruction(0x7171).uncompressed()
+        , Instruction::addi(2,2,-176)); // addi sp,sp,-176
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x35f9);
+    assert_eq!(
+        Instruction(0x35f9).uncompressed()
+        , Instruction::jal(1,0x107b6 - 0x108e8)); // jal r1,0x107b6
+    println!("uncompress : {i:016b} ({i:04x})", i = 0xd606);
+    assert_eq!(
+        Instruction(0xd606).uncompressed()
+        , Instruction::sw(2, 1, 44)); // sw r1 44(r2)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x41c8);
+    assert_eq!(
+        Instruction(0x41c8).uncompressed()
+        , Instruction::lw(10, 11, 4)); // lw r10 4(r11)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x4610);
+    assert_eq!(
+        Instruction(0x4610).uncompressed()
+        , Instruction::lw(12, 12, 8)); // lw r12 8(r12)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x9732);
+    assert_eq!(
+        Instruction(0x9732).uncompressed()
+        , Instruction::add(14, 14, 12)); // add a4,a4,a2
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x060a);
+    assert_eq!(
+        Instruction(0x060a).uncompressed()
+        , Instruction::slli(12, 12, 2)); // slli a2,a2,0x2
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x0605);
+    assert_eq!(
+        Instruction(0x0605).uncompressed()
+        , Instruction::addi(12, 12, 1)); // addi a2,a2,1
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x4314);
+    assert_eq!(
+        Instruction(0x4314).uncompressed()
+        , Instruction::lw(13, 14, 0)); // lw a3,0(a4)
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x17fd);
+    assert_eq!(
+        Instruction(0x17fd).uncompressed()
+        , Instruction::addi(15, 15, -1)); // addi a5,a5,-1
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x9636);
+    assert_eq!(
+        Instruction(0x9636).uncompressed()
+        , Instruction::add(12, 12, 13)); // add a2,a2,a3
 }
