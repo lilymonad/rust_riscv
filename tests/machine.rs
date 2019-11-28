@@ -150,72 +150,72 @@ fn fibonacci() {
     assert_eq!(machine.get_register(4), 5);
 }
 
-#[test]
-fn real_world_tests_simtx() {
-    let ex_dir = "resources/executables/";
-    let res_dir = "resources/memory_snapshots/simtx/";
-    let executables = fs::read_dir(ex_dir)
-        .expect("Cannot read 'resources/executables' directory")
-        .map(|entry| entry.map(|e| e.file_name()
-                                         .into_string())
-                          .expect("Entry doesn't exist")
-                          .expect("Bad entry name format"));
-
-    for exec_path in executables {
-        let file = elflib::File::open_path(String::from(ex_dir) + &exec_path)
-            .expect("ELF file not found");
-
-        let calls = elf::get_plt_symbols(&file)
-            .expect("No .plt section in the ELF");
-        let pc = elf::get_main_pc(&file)
-            .expect("This ELF file has no function named 'main'");
-
-        // create some memory buffer to load instructions and rodata
-        let memory = Arc::new(Mutex::new(BTreeMap::new()));
-
-        {
-            let mut memory = memory.lock().unwrap();
-            assert!(elf::load_instructions(&file, &mut *memory)
-                    , "This ELF file has no .text section");
-
-            if !elf::load_rodata(&file, &mut *memory) {
-                    println!("This ELF file has no .rodata section");
-            }
-
-            memory.allocate_at((-1024i32) as usize, 1024);
-        }
-
-        // create the machine and set it up
-        let mut machine = SIMTX::new(4, 4, calls);
-        println!("setting pc to 0x{:x}", pc as usize);
-        machine.set_pc_of(0, pc);
-        machine.set_i_register_of(0, 1, 0);
-
-        // execute the program until its end
-        loop {
-            machine.step(memory.clone());
-
-            if machine.finished() {
-                break;
-            }
-        }
-
-        let snapshot = File::open(String::from(res_dir) + &exec_path)
-            .expect("Snapshot file not found");
-        let buffer = BufReader::new(&snapshot);
-        for line in buffer.lines() {
-            if let Ok(l) = line {
-                let mut linebuf = l.split_ascii_whitespace();
-                let key : usize = linebuf.next().and_then(|s| s.parse().ok())
-                    .expect("Snapshot bad format");
-                let value : u32 = linebuf.next().and_then(|s| s.parse().ok())
-                    .expect("Snapshot bad format");
-
-                assert_eq!(memory.lock().unwrap().get_32(key), value.to_be());
-            }
-        }
-    }
-}
+//#[test]
+//fn real_world_tests_simtx() {
+//    let ex_dir = "resources/executables/";
+//    let res_dir = "resources/memory_snapshots/simtx/";
+//    let executables = fs::read_dir(ex_dir)
+//        .expect("Cannot read 'resources/executables' directory")
+//        .map(|entry| entry.map(|e| e.file_name()
+//                                         .into_string())
+//                          .expect("Entry doesn't exist")
+//                          .expect("Bad entry name format"));
+//
+//    for exec_path in executables {
+//        let file = elflib::File::open_path(String::from(ex_dir) + &exec_path)
+//            .expect("ELF file not found");
+//
+//        let calls = elf::get_plt_symbols(&file)
+//            .expect("No .plt section in the ELF");
+//        let pc = elf::get_main_pc(&file)
+//            .expect("This ELF file has no function named 'main'");
+//
+//        // create some memory buffer to load instructions and rodata
+//        let memory = Arc::new(Mutex::new(BTreeMap::new()));
+//
+//        {
+//            let mut memory = memory.lock().unwrap();
+//            assert!(elf::load_instructions(&file, &mut *memory)
+//                    , "This ELF file has no .text section");
+//
+//            if !elf::load_rodata(&file, &mut *memory) {
+//                    println!("This ELF file has no .rodata section");
+//            }
+//
+//            memory.allocate_at((-1024i32) as usize, 1024);
+//        }
+//
+//        // create the machine and set it up
+//        let mut machine = SIMTX::new(4, 4, calls);
+//        println!("setting pc to 0x{:x}", pc as usize);
+//        machine.set_pc_of(0, pc);
+//        machine.set_i_register_of(0, 1, 0);
+//
+//        // execute the program until its end
+//        loop {
+//            machine.step(memory.clone());
+//
+//            if machine.finished() {
+//                break;
+//            }
+//        }
+//
+//        let snapshot = File::open(String::from(res_dir) + &exec_path)
+//            .expect("Snapshot file not found");
+//        let buffer = BufReader::new(&snapshot);
+//        for line in buffer.lines() {
+//            if let Ok(l) = line {
+//                let mut linebuf = l.split_ascii_whitespace();
+//                let key : usize = linebuf.next().and_then(|s| s.parse().ok())
+//                    .expect("Snapshot bad format");
+//                let value : u32 = linebuf.next().and_then(|s| s.parse().ok())
+//                    .expect("Snapshot bad format");
+//
+//                assert_eq!(memory.lock().unwrap().get_32(key), value.to_be());
+//            }
+//        }
+//    }
+//}
 
 #[test]
 #[should_panic]
