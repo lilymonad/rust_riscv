@@ -5,6 +5,7 @@
 //! [RISC-V ISA specification](https://riscv.org/specifications/).
 
 extern crate elf as elflib;
+extern crate crossbeam;
 
 /// The ISA module containing everything related to instruction format.
 pub mod isa;
@@ -21,3 +22,5 @@ pub mod types;
 
 /// Helper functions for elf file reading
 pub mod elf;
+
+pub use std::thread;

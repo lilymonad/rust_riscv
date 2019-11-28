@@ -404,7 +404,7 @@ pub trait MultiCoreIMachine {
     /// Though the single core traits only need only a mutable reference to the
     /// memory, multi-cores ones uses a `Arc<Mutex<Memory>>` reference. This 
     /// helps creating a multi-threaded version of the step function.
-    fn step(&mut self, memory:Arc<Mutex<dyn Memory>>);
+    fn step(&mut self, memory:Arc<Mutex<dyn Memory + std::marker::Send>>);
  
     fn get_i_register_of(&self, coreid:usize, id:usize) -> Self::IntegerType;
     fn set_i_register_of(&mut self, coreid:usize, id:usize, value:Self::IntegerType);

@@ -60,12 +60,12 @@ pub struct PipelineState {
 
 impl PipelineState {
     pub fn empty() -> PipelineState {
-        PipelineState { pc: 0, instruction: Instruction(0) }
+        PipelineState { pc: 0, instruction: Instruction::nop() }
     }
 }
 
 pub struct Machine {
-    pub registers: [i32; 31],
+    pub registers: [i32; 32],
     pc: i32,
 
     pub if2dc: PipelineState,
@@ -123,7 +123,7 @@ impl Machine {
     pub fn new() -> Machine {
         let mut ret = Machine {
             csr_file: [0; 4096],
-            registers : [0; 31],
+            registers : [0; 32],
             pc: 0, 
             if2dc: PipelineState::empty(),
             dc2ex: PipelineState::empty(),
@@ -140,14 +140,14 @@ impl Machine {
         if i <= 0 || i > 31 {
             0
         } else {
-            self.registers[i-1]
+            self.registers[i]
         }
     }
 
     pub fn set_register(&mut self, i:usize, x:i32) {
         // TODO implement exceptions when writing to r0
         if i > 0 && i < 32 {
-            self.registers[i-1] = x
+            self.registers[i] = x
         }
     }
 
@@ -216,17 +216,19 @@ impl Machine {
                 to_mem.value = i.get_imm_u();
             },
             OpCode::AUIPC => {
-                self.pc = curr_pc + i.get_imm_u();
-                self.if2dc = PipelineState::empty();
-                self.dc2ex = PipelineState::empty()
+                to_mem.wb_perform = true;
+                to_mem.wb_rd = i.get_rd() as usize;
+                to_mem.value = curr_pc + i.get_imm_u();
+                self.if2dc.instruction = Instruction::nop();
+                self.dc2ex.instruction = Instruction::nop();
             },
             OpCode::JAL => {
                 to_mem.value = curr_pc.wrapping_add(4);
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
                 self.pc = curr_pc.wrapping_add(i.get_imm_j());
-                self.if2dc = PipelineState::empty();
-                self.dc2ex = PipelineState::empty()
+                self.if2dc.instruction = Instruction::nop();
+                self.dc2ex.instruction = Instruction::nop();
             },
             OpCode::JALR => {
                 to_mem.value = curr_pc.wrapping_add(4);
@@ -234,8 +236,8 @@ impl Machine {
                 to_mem.wb_rd = i.get_rd() as usize;
                 self.pc = self.get_register(i.get_rs1() as usize)
                     .wrapping_add(i.get_imm_i());
-                self.if2dc = PipelineState::empty();
-                self.dc2ex = PipelineState::empty()
+                self.if2dc.instruction = Instruction::nop();
+                self.dc2ex.instruction = Instruction::nop();
             },
             OpCode::BRANCH => {
                 let  tpc = curr_pc.wrapping_add(i.get_imm_b());
@@ -260,8 +262,8 @@ impl Machine {
                 };
 
                 if self.pc == tpc {
-                    self.if2dc = PipelineState::empty();
-                    self.dc2ex = PipelineState::empty()
+                    self.if2dc.instruction = Instruction::nop();
+                    self.dc2ex.instruction = Instruction::nop();
                 }
             },
             OpCode::LOAD => {
@@ -285,12 +287,13 @@ impl Machine {
                 to_mem.wb_perform = true;
                 to_mem.wb_rd = i.get_rd() as usize;
 
-                let v1 = self.get_register(i.get_rs1() as usize);
+                let r1 = i.get_rs1() as usize;
+                let v1 = self.get_register(r1);
                 let v2 = if i.get_funct3() & 0b11 == 1 { i.get_rs2() as i32 }
                          else { i.get_imm_i() };
 
                 to_mem.value = match i.get_funct3() {
-                    0b000 => v1.wrapping_add(v2),
+                    0b000 => {v1.wrapping_add(v2) },
                     0b010 => (v1 < v2) as i32,
                     0b011 => ((v1 as u32) < v2 as u32) as i32,
                     0b100 => v1 ^ v2,
@@ -357,13 +360,13 @@ impl Machine {
                                 match i.get_rs2() {
                                     0b00000 => { /* ECALL */
                                         self.raise_exception(false, self.get_privilege() as i32 + 8, 0, curr_pc);
-                                        self.dc2ex = PipelineState::empty();
-                                        self.if2dc = PipelineState::empty();
+                                        self.dc2ex.instruction = Instruction::nop();
+                                        self.if2dc.instruction = Instruction::nop();
                                     },
                                     0b00001 => { /* EBREAK */
                                         self.raise_exception(false, 3, 0, curr_pc);
-                                        self.dc2ex = PipelineState::empty();
-                                        self.if2dc = PipelineState::empty();
+                                        self.dc2ex.instruction = Instruction::nop();
+                                        self.if2dc.instruction = Instruction::nop();
                                     },
                                     0b00010 => { /* URET */ 
                                         let mpie = self.get_csr_field(CsrField::UPIE);
@@ -508,8 +511,8 @@ impl Machine {
 
         if illegal {
             self.raise_exception(false, 2, 0, curr_pc);
-            self.dc2ex = PipelineState::empty();
-            self.if2dc = PipelineState::empty();
+            self.dc2ex.instruction = Instruction::nop();
+            self.if2dc.instruction = Instruction::nop();
         }
 
         self.ex2mem = to_mem
@@ -534,7 +537,7 @@ impl Machine {
                 (4, Instruction((second << 16) | first))
             };
 
-        println!("fetched {}", i);
+        //println!("fetched {}", i);
         self.if2dc = PipelineState { pc: self.pc, instruction: i };
         self.pc += advance
     }

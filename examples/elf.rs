@@ -2,10 +2,11 @@ extern crate elf as elflib;
 extern crate riscv_sandbox;
 
 use riscv_sandbox::elf;
-use riscv_sandbox::machine::{IntegerMachine, rv32pthread::Machine};
+use riscv_sandbox::machine::{IntegerMachine, MultiCoreIMachine, rv32pthread::Machine};
 use riscv_sandbox::memory::Memory;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::env;
+use std::sync::{Arc, Mutex};
 
 fn main() {
 
@@ -17,12 +18,13 @@ fn main() {
         .expect("ELF file not found");
 
     let calls = elf::get_plt_symbols(&file)
+        .or(Some(HashMap::new()))
         .expect("No .plt section in the ELF");
     let pc = elf::get_main_pc(&file)
         .expect("This ELF file has no function named 'main'");
 
     // create some memory buffer to load instructions and rodata
-    let mut memory : HashMap<usize, u32> = HashMap::new();
+    let mut memory : BTreeMap<usize, [u8;4096]> = BTreeMap::new();
     assert!(elf::load_instructions(&file, &mut memory)
             , "This ELF file has no .text section");
 
@@ -39,12 +41,15 @@ fn main() {
     machine.set_i_register(1, 0);
     let mut i = 0;
 
+    let mem = Arc::new(Mutex::new(memory));
+
     // execute the program until its end
     loop {
-        machine.cycle(&mut memory);
+        machine.step(mem.clone());
+        //machine.cycle(&mut memory);
         i += 1;
 
-        if machine.finished() {
+        if IntegerMachine::finished(&machine) {
             break;
         }
     }
