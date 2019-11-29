@@ -63,11 +63,12 @@ pub trait MachineFloat
 impl MachineFloat for f32 {
     const FLEN :u32 = 32;
 }
+
 impl MachineFloat for f64 {
     const FLEN : u32 = 64;
 }
 
-pub trait BitSet {
+pub trait BitSet : Sized + Copy {
     const SIZE : u32;
     fn set(&mut self, id:usize);
     fn unset(&mut self, id:usize);
@@ -75,6 +76,82 @@ pub trait BitSet {
     fn singleton(id:usize) -> Self;
     fn any(&self) -> bool;
     fn none(&self) -> bool;
+
+    fn bits(&self) -> Bits<Self> {
+        Bits { index:0, set:*self }
+    }
+}
+
+pub struct Bits<BS:BitSet> {
+    index:u32,
+    set:BS,
+}
+
+impl<BS:BitSet> Iterator for Bits<BS> {
+    type Item = bool;
+    fn next(&mut self) -> Option<bool> {
+        if self.index == BS::SIZE {
+            None
+        } else {
+            let ret = self.set.at(self.index as usize);
+            self.index += 1;
+            Some(ret)
+        }
+    }
+}
+
+pub struct Ones<BS:Iterator<Item=bool>> {
+    index:u32,
+    iter:BS,
+}
+
+impl<BS:Iterator<Item=bool>> Iterator for Ones<BS> {
+    type Item = u32;
+    fn next(&mut self) -> Option<u32> {
+        let ret = loop {
+            match self.iter.next() {
+                Some(true) => break Some(self.index),
+                None => break None,
+                _ => {},
+            }
+            self.index += 1
+        };
+        self.index += 1;
+        ret
+    }
+}
+
+pub struct Zeroes<BS:Iterator<Item=bool>> {
+    index:u32,
+    iter:BS,
+}
+
+pub trait BoolIterator : Iterator<Item=bool> + Sized {
+    fn zeroes(self) -> Zeroes<Self> {
+        Zeroes { index: 0, iter: self }
+    }
+
+    fn ones(self) -> Ones<Self> {
+        Ones { index: 0, iter: self }
+    }
+}
+
+impl<T:Iterator<Item=bool> + Sized> BoolIterator for T { }
+
+impl<BS:Iterator<Item=bool>> Iterator for Zeroes<BS> {
+    type Item = u32;
+    fn next(&mut self) -> Option<u32> {
+        let ret = loop {
+            match self.iter.next() {
+                Some(false) => break Some(self.index),
+                None => break None,
+                _ => {},
+            }
+            self.index += 1
+        };
+        self.index += 1;
+        ret
+    }
 }
 
 impl BitSet for u32 {
@@ -86,6 +163,7 @@ impl BitSet for u32 {
     fn any(&self) -> bool { *self != 0 }
     fn none(&self) -> bool { *self == 0 }
 }
+
 impl BitSet for u64 {
     const SIZE : u32 = 64;
     fn set(&mut self, id:usize) { *self |= 1 << id }
@@ -95,6 +173,7 @@ impl BitSet for u64 {
     fn any(&self) -> bool { *self != 0 }
     fn none(&self) -> bool { *self == 0 }
 }
+
 impl BitSet for u128 {
     const SIZE : u32 = 128;
     fn set(&mut self, id:usize) { *self |= 1 << id }
