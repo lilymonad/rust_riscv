@@ -68,6 +68,7 @@ impl MachineFloat for f64 {
 }
 
 pub trait BitSet {
+    const SIZE : u32;
     fn set(&mut self, id:usize);
     fn unset(&mut self, id:usize);
     fn at(&self, id:usize) -> bool;
@@ -77,6 +78,7 @@ pub trait BitSet {
 }
 
 impl BitSet for u32 {
+    const SIZE : u32 = 32;
     fn set(&mut self, id:usize) { *self |= 1 << id }
     fn unset(&mut self, id:usize) { *self &= !(1 << id) }
     fn at(&self, id:usize) -> bool { (*self & (1 << id)) != 0 }
@@ -85,6 +87,7 @@ impl BitSet for u32 {
     fn none(&self) -> bool { *self == 0 }
 }
 impl BitSet for u64 {
+    const SIZE : u32 = 64;
     fn set(&mut self, id:usize) { *self |= 1 << id }
     fn unset(&mut self, id:usize) { *self &= !(1 << id) }
     fn at(&self, id:usize) -> bool { (*self & (1 << id)) != 0 }
@@ -93,6 +96,7 @@ impl BitSet for u64 {
     fn none(&self) -> bool { *self == 0 }
 }
 impl BitSet for u128 {
+    const SIZE : u32 = 128;
     fn set(&mut self, id:usize) { *self |= 1 << id }
     fn unset(&mut self, id:usize) { *self &= !(1 << id) }
     fn at(&self, id:usize) -> bool { (*self & (1 << id)) != 0 }
