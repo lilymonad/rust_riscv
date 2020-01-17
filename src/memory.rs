@@ -148,7 +148,7 @@ impl Memory for BTreeMap<usize, [u8;4096] > {
         let chunk_id = addr / 4096;
         let byte_offset = addr % 4096;
         if let Some(chunk) = self.get_mut(&chunk_id) {
-            chunk[byte_offset] = value
+            chunk[byte_offset] = value;
         } else {
             panic!("BTreeMap<usize, [u8;4096]>::set_8(0x{:x}, {})", addr, value)
         }

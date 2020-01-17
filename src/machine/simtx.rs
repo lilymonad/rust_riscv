@@ -1,7 +1,7 @@
 use machine::MultiCoreIMachine;
-use isa::{Instruction, OpCode};
+use isa::{Instruction, OpCode, CsrId};
 use memory::*;
-use types::{MachineInteger, BitSet};
+use types::{MachineInteger, BitSet, BoolIterator};
 use std::sync::{Arc, Mutex};
 use std::fmt;
 use std::ops::DerefMut;
@@ -20,7 +20,7 @@ struct Core {
 /// we handle divergence by remembering where all threads are with a
 /// `(fetch_pc, execution_mask)` tuple. Before fetching instructions, we chose
 /// a `Path` to advance.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Path {
     pub fetch_pc : i32,
     pub execution_mask : BitVec,
@@ -39,7 +39,7 @@ impl Path {
     }
 
     pub fn is_single(&self) -> bool {
-        self.execution_mask.count_ones() == 1
+        self.execution_mask.bits().ones().count() == 1
     }
 }
 
@@ -49,6 +49,18 @@ impl fmt::Display for Path {
     }
 }
 
+#[derive(Debug, Clone)]
+enum BranchOutcome<BV:BitSet> {
+    Uniform(bool, BV),
+    Divergent(BV, BV),
+}
+
+#[derive(Debug, Clone)]
+struct CondBranchData {
+    times_passed:usize,
+    taken_hist:Vec<BranchOutcome<BitVec>>,
+}
+
 /// Defines a hardware warp (a group of threads) which all execute instructions
 /// in an SIMD fasion.
 #[derive(Clone)]
@@ -56,11 +68,13 @@ struct Warp {
     pub cores: Vec<Core>,
     pub paths: Vec<Path>,
     pub current_path: usize,
+    pub cycles_since_last_schedule: usize,
 
     // Log variables
     branch_mask_hist: HashMap<i32, Vec<BitVec>>,
     thresholds: usize,
     fusions: usize,
+    cond_branch_data: HashMap<i32, CondBranchData>,
 }
 
 impl Warp {
@@ -74,23 +88,25 @@ impl Warp {
             branch_mask_hist: HashMap::new(),
             thresholds: 0,
             fusions: 0,
+            cond_branch_data: HashMap::new(),
+            cycles_since_last_schedule: 0,
         }
     }
 
-    pub fn get_path_of_core_mut(&mut self, cid:usize) -> &mut Path {
+    pub fn _get_path_of_core_mut(&mut self, cid:usize) -> Option<&mut Path> {
         for p in &mut self.paths {
-            if p.execution_mask.at(cid) { return p }
+            if p.execution_mask.at(cid) { return Some(p) }
         }
 
-        panic!("No path");
+        None
     }
 
-    pub fn get_path_of_core(&self, cid:usize) -> &Path {
+    pub fn _get_path_of_core(&self, cid:usize) -> Option<&Path> {
         for p in &self.paths {
-            if p.execution_mask.at(cid) { return p }
+            if p.execution_mask.at(cid) { return Some(p) }
         }
 
-        panic!("No path");
+        None
     }
 
     pub fn get_single_core_id(&mut self) -> usize {
@@ -110,13 +126,21 @@ impl Warp {
     /// This function sets the `current_path` of the `Warp` correcly according
     /// to the scheduling rule, but also fusion paths with the same PC.
     pub fn schedule_path(&mut self) {
-        if self.paths.is_empty() { self.current_path = 0xFFFFFFFF }
-        else {
-            let old_pc = if self.current_path == 0xFFFFFFFF {
-                0
-            } else {
-                self.paths[self.current_path].fetch_pc
-            };
+
+        let schedule_trigger = 16;
+
+        if self.paths.is_empty() { 
+            self.current_path = 0xFFFFFFFF;
+            self.cycles_since_last_schedule = schedule_trigger;
+        } else {
+
+            // old_pc is:
+            // - None if we destroyed the last path
+            // - Some(x) if we still have the last path, in order to retrieve it
+            //      after fusion
+            let old_pc = if self.current_path != 0xFFFFFFFF {
+                Some(self.paths[self.current_path].fetch_pc)
+            } else { None };
 
             // Fusion of path with the same PC
             let mut fusionned = HashMap::new();
@@ -131,34 +155,55 @@ impl Warp {
             }
 
             // If fusion occurred, rebuild the path table
-            // + reset current_path to 0
+            // + reset current_path to the good path
             if fusion {
                 self.fusions += 1;
                 let mut npaths = Vec::new();
                 for (k, v) in fusionned {
-                    if k == old_pc {
-                        self.current_path = npaths.len();
+                    if let Some(pc) = old_pc {
+                        if k == pc {
+                            self.current_path = npaths.len();
+                        }
                     }
                     npaths.push(Path::from_pc_mask(k, v));
                 }
                 self.paths = npaths;
             }
 
-            // else use schedule method
-            // [round robin]
-            //self.current_path = (self.current_path + 1) % self.paths.len();
+            // only schedule if we passed the "schedule threshold" or if the last
+            // path we scheduled just died
+            if !(  self.cycles_since_last_schedule >= schedule_trigger
+                || old_pc.is_none())
+            {
+                self.cycles_since_last_schedule += 1;
+                return
+            }
 
-            // [min pc + time idle]
+            // when re-scheduling, reset the cycle counter
+            self.cycles_since_last_schedule = 0;
+
+            // gather threads which reached the idle threshold
+            let idle_threshold = 4;
+            let mut too_idle = Vec::new();
             for i in 0..self.paths.len() {
-                // if the idle time of the thread is greater than a threshold
-                // execute this path in priority
-                if self.paths[i].time_since_scheduled > 64 {
-                    self.current_path = i;
-                    self.paths[i].time_since_scheduled = 0;
-                    self.thresholds += 1;
-                    break
+                if self.paths[i].time_since_scheduled > idle_threshold {
+                    too_idle.push(i);
                 }
+            }
 
+            // work_on represents the list of every path which are eligible for
+            // scheduling
+            //
+            // if we have idle threads, work_on represent only those idle threads
+            // if we don't, we just iterate over all threads
+            let work_on = if too_idle.is_empty() { (0..self.paths.len()).collect() } else { too_idle };
+            let work_on : Vec<usize> = work_on.into_iter().filter(|i| {
+                self.paths[*i].fetch_pc != 0
+            }).collect();
+            self.current_path = work_on[0];
+
+            // [min pc] over only eligible threads
+            for i in work_on {
                 // compute the path with the minimum pc
                 let ipc = self.paths[i].fetch_pc;
                 if ipc < self.paths[self.current_path].fetch_pc {
@@ -168,8 +213,8 @@ impl Warp {
 
             // for each not-chosen path, increment their idle time
             for i in 0..self.paths.len() {
-                if i == self.current_path { continue }
-                self.paths[i].time_since_scheduled += 1
+                if i == self.current_path { self.paths[i].time_since_scheduled = 0 }
+                else { self.paths[i].time_since_scheduled += 1 }
             }
         }
     }
@@ -177,28 +222,37 @@ impl Warp {
     /// This function is a helper used to work on all alive threads of the
     /// `current_path`.
     pub fn for_each_core_alive<T:FnMut(&mut Core)->()>(&mut self, mut f:T) {
-        let path = &mut self.paths[self.current_path];
-        for i in 0..self.cores.len() {
-            if path.execution_mask.at(i) {
-                f(&mut self.cores[i]);
-            }
+        let ex = self.paths[self.current_path].execution_mask;
+        for i in ex.bits().ones() {
+            f(&mut self.cores[i as usize]);
         }
+    }
+
+    pub fn _cores(&self) -> impl Iterator<Item=&Core> {
+        let ex = self.paths[self.current_path].execution_mask;
+        self.cores.iter().enumerate().filter_map(move |(i, c)| {
+            if ex.at(i) { Some(c) } else { None }
+        })
+    }
+
+    pub fn cores_mut(&mut self) -> impl Iterator<Item=&mut Core> {
+        let ex = self.paths[self.current_path].execution_mask;
+        self.cores.iter_mut().enumerate().filter_map(move |(i, c)| {
+            if ex.at(i) { Some(c) } else { None }
+        })
     }
 
     /// Same as `for_each_core_alive()` but with the ID of the core.
     fn for_each_core_alive_i<T:FnMut(usize, &mut Core)->()>(&mut self, mut f:T) {
-        let path = &mut self.paths[self.current_path];
-        for i in 0..self.cores.len() {
-            if path.execution_mask.at(i) {
-                f(i, &mut self.cores[i]);
-            }
+        let ex = self.paths[self.current_path].execution_mask;
+        for i in ex.bits().ones() {
+            f(i as usize, &mut self.cores[i as usize])
         }
     }
 
     /// Returns an iterator going through all alive cores IDs in order.
     pub fn alive_cores_ids(&self) -> impl Iterator<Item=usize> {
-        let bv = self.paths[self.current_path].execution_mask;
-        (0..self.cores.len()).into_iter().filter(move |i| bv.at(*i))
+        self.paths[self.current_path].execution_mask.bits().ones().map(|id| id as usize)
     }
 
     fn update_branch_hist(&mut self, pc:i32, mask:BitVec) {
@@ -217,7 +271,7 @@ impl Warp {
 
         let pid = self.current_path;
         let path = self.paths[pid];
-        let mask = &path.execution_mask;
+        let mask = path.execution_mask;
         let pc = path.fetch_pc;
         let inst = Instruction(mem.get_32(pc as usize));
 
@@ -232,9 +286,9 @@ impl Warp {
 
         match inst.get_opcode_enum() {
             OpCode::LUI => {
-                self.for_each_core_alive(|core| {
+                for core in self.cores_mut() {
                     core.registers[inst.get_rd() as usize] = inst.get_imm_u();
-                });
+                }
             },
             OpCode::AUIPC => { // direct jumps are always uniform
                 self.paths[pid].fetch_pc = pc.wrapping_add(inst.get_imm_u());
@@ -273,8 +327,10 @@ impl Warp {
                     self.paths[pid].fetch_pc = *nph.keys().next().unwrap();
                 } else {
                     // If not, create as many paths as needed and inject them
+                    let old_pc = self.paths[self.current_path].fetch_pc;
                     self.paths.remove(self.current_path);
                     for (pc, mask) in nph {
+                        if old_pc == pc { self.current_path = self.paths.len() }
                         self.paths.push(Path::from_pc_mask(pc, mask));
                     }
                 }
@@ -298,12 +354,12 @@ impl Warp {
                     let uv2 = v2 as u32;
 
                     let take = match inst.get_funct3() {
-                        0b000 => {v1 ==  v2}, // BEQ
-                        0b001 => {v1 !=  v2 }, // BNE
-                        0b100 => {v1 <   v2 }, // BLT
+                        0b000 => { v1 ==  v2 }, // BEQ
+                        0b001 => { v1 !=  v2 }, // BNE
+                        0b100 => { v1 <   v2 }, // BLT
                         0b101 => { v1 >=  v2 }, // BGE
-                        0b110 =>{ uv1 <  uv2 }, // BLTU
-                        0b111 =>{ uv1 >= uv2 }, // BGEU
+                        0b110 => { uv1 <  uv2 }, // BLTU
+                        0b111 => { uv1 >= uv2 }, // BGEU
                         _ => false,
                     };
 
@@ -325,22 +381,42 @@ impl Warp {
                     self.paths.push(Path::from_pc_mask(ntpc, not_taken_mask));
                 }
 
+                let outcome = 
+                        if !not_taken_mask.any() {
+                            BranchOutcome::Uniform(true, taken_mask)
+                        } else if !taken_mask.any() {
+                            BranchOutcome::Uniform(false, not_taken_mask)
+                        } else {
+                            BranchOutcome::Divergent(taken_mask, not_taken_mask)
+                        };
+                if let Some(dat) = self.cond_branch_data.get_mut(&pc) {
+                    dat.times_passed += 1;
+                    dat.taken_hist.push(outcome);
+                } else {
+                    let taken_hist = vec![outcome];
+                    let to_push = CondBranchData { times_passed:1, taken_hist };
+                    self.cond_branch_data.insert(pc, to_push);
+                }
+
                 update_pc = false
             },
             OpCode::LOAD => {
                 let width = inst.get_funct3();
                 self.for_each_core_alive(|core| {
-                    let base = core.registers[inst.get_rs1() as usize];
+                    let rbase = inst.get_rs1() as usize;
+                    let base = core.registers[rbase];
                     let imm = inst.get_imm_i();
                     //println!("{:x}(r{}) + {:x} = {:x}", base, inst.get_rs1(), imm, base.wrapping_add(imm));
+
                     let addr = (base.wrapping_add(imm) as usize) & 0xffffffff;
-                    core.registers[inst.get_rd() as usize] =
-                        match width {
+
+                    let value = match width {
                             0 => mem.get_8(addr) as i32,
                             1 => mem.get_16(addr) as i32,
                             2 => mem.get_32(addr) as i32,
                             _ => panic!("LOAD: bad word width"), // ERROR
                         };
+                    core.registers[inst.get_rd() as usize] = value;
                 });
             },
             OpCode::STORE => {
@@ -348,6 +424,7 @@ impl Warp {
                 self.for_each_core_alive(|core| {
                     let base = core.registers[inst.get_rs1() as usize];
                     let addr = (base.wrapping_add(inst.get_imm_s()) as usize) & 0xffffffff;
+
                     let src = core.registers[inst.get_rs2() as usize];
                     match width {
                         0 => mem.set_8(addr, src as u8),
@@ -439,7 +516,7 @@ impl Warp {
         if update_pc {
             self.paths[pid].fetch_pc = next_pc
         } else {
-            self.update_branch_hist(pc, *mask);
+            self.update_branch_hist(pc, mask)
         }
     }
 }
@@ -464,6 +541,13 @@ struct Barrier {
     current_cap:i32,
 }
 
+#[derive(Debug)]
+struct LoopData {
+    times_passed:usize,
+    num_threads_passed:usize,
+}
+
+
 /// The SIMT-X machine. To handle `pthread` or `omp` system calls, we detect them
 /// using plt information, and emulate them.
 pub struct Machine {
@@ -487,6 +571,9 @@ pub struct Machine {
 
     // For loop detection
     detected_loops: HashMap<i32, i32>,
+
+    // For execution analysis
+    loop_data: HashMap<i32, LoopData>,
 }
 
 impl Machine {
@@ -516,6 +603,7 @@ impl Machine {
             in_barrier,
             heap_ptr:0x10000000,
             heap_elements:BTreeMap::new(),
+            loop_data:HashMap::new(),
         }
     }
 
@@ -542,12 +630,37 @@ impl Machine {
             .expect("Free unalocated pointer").1 = false;
     }
 
-    fn pop_first_idle(&mut self) -> usize {
+    pub fn pop_first_idle(&mut self) -> usize {
         self.idle_threads.pop().expect("No more threads")
     }
 
     fn push_idle(&mut self, thread:usize) {
         self.idle_threads.push(thread)
+    }
+
+    fn clean_idle(&mut self) {
+        let tpw = self.warps[0].cores.len();
+
+        // for each warp
+        for wi in 0..self.warps.len() {
+            // Filter out idle path (with fetch_pc == 0)
+            // and re-push idle threads into the idle pool
+            let mut new_path = self.warps[wi].current_path;
+            let new_paths = self.warps[wi].paths.clone().into_iter().enumerate().filter_map(|(i,p)| {
+                if p.fetch_pc == 0 {
+                    if i == new_path { new_path = 0xFFFFFFFF }
+                    for i in p.execution_mask.bits().ones() {
+                        self.push_idle(wi * tpw + i as usize)
+                    }
+                    None
+                } else {
+                    Some(p)
+                }
+            });
+
+            self.warps[wi].paths = new_paths.collect();
+            self.warps[wi].current_path = new_path;
+        }
     }
 
     /// Prints the history of execution masks of the branch at address `pc`.
@@ -578,16 +691,39 @@ impl Machine {
                     println!("\t[{:032b}]", bv);
                 }
             }
+            for (pc, hist) in &warp.cond_branch_data {
+                println!("\t0x{:x}", pc);
+                for outcome in &hist.taken_hist {
+                    match outcome {
+                        BranchOutcome::Uniform(taken, mask) => {
+                            let s : String = mask.bits().map(|b| {
+                                if b { if *taken { 'A' } else { 'B' } } else { ' ' }
+                            }).collect();
+                            println!("{}", s);
+                        },
+                        BranchOutcome::Divergent(tm, ntm) => {
+                            let s : String = tm.bits().zip(ntm.bits())
+                                .map(|(t,nt)| {
+                                    if t { 'A' } else if nt { 'B' } else { ' ' }
+                                }).collect();
+                            println!("{}", s);
+                        },
+                    }
+                }
+            }
             println!("threshold reached {} times", warp.thresholds);
             println!("paths fusionned {} times", warp.fusions);
-            println!("detected loops:");
-            for (end, start) in &self.detected_loops {
-                println!("{:08x} -> {:08x}", start, end)
-            }
+        }
+        println!("detected loops:");
+        for (end, start) in &self.detected_loops {
+            println!("{:08x} -> {:08x}", start, end)
+        }
+        for (pc, stats) in &self.loop_data {
+            println!("{:08x}: {:?}", pc, stats);
         }
     }
 
-    fn free_barrier(&mut self, barr:i32) {
+    fn free_barrier(&mut self, barr:i32, advance:i32) {
         for wid in 0..self.warps.len() {
             let warp = &mut self.warps[wid];
             let tpw = warp.cores.len();
@@ -608,7 +744,7 @@ impl Machine {
 
                 if bv_cont.any() {
                     warp.paths[pid].execution_mask = bv_cont;
-                    warp.paths[pid].fetch_pc += 4;
+                    warp.paths[pid].fetch_pc += advance;
                     
                     if bv_barr.any() {
                         warp.paths.push(Path::from_pc_mask(pc, bv_barr));
@@ -628,11 +764,13 @@ impl MultiCoreIMachine for Machine {
 
         let old_gp = self.warps[0].cores[0].registers[3];
         for wid in 0..self.warps.len() {
+            self.clean_idle();
             self.warps[wid].schedule_path();
 
             let pathid = self.warps[wid].current_path;
             if pathid == 0xFFFFFFFF || self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
             let pc = self.warps[wid].paths[pathid].fetch_pc;
+
             let i = Instruction(mem.get_32(pc as usize));
 
             let (advance, i) = if i.is_compressed() {
@@ -641,13 +779,23 @@ impl MultiCoreIMachine for Machine {
                 (4, i)
             };
 
-        //let old14 = self.warps[wid].cores[0].registers[14];
-
             println!("warp {} 0x{:x} :: {}", wid, pc, i);
         
-            if i.is_jump() {
+            // Update back-branch stats
+            if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {
                 if i.jump_offset() < 0 {
+                    let num_threads_passed = self.warps[wid]
+                            .paths[pathid].execution_mask.bits().ones().count();
                     self.detected_loops.insert(pc, pc+i.jump_offset());
+                    if let Some(dat) = self.loop_data.get_mut(&pc) {
+                        dat.times_passed += 1;
+                        dat.num_threads_passed += self.warps[wid]
+                            .paths[pathid].execution_mask.bits().ones().count();
+                    } else {
+                        let dat = LoopData { times_passed: 1, num_threads_passed };
+                        self.loop_data.insert(pc, dat);
+
+                    }
                 }
             }
 
@@ -670,12 +818,13 @@ impl MultiCoreIMachine for Machine {
 
                         let cid = self.warps[wid].get_single_core_id();
                         // write in memory the tid
-                        mem.set_32(self.warps[wid].cores[cid].registers[10] as usize, tid as u32);
+                        let addr = self.warps[wid].cores[cid].registers[10] as usize;
+                        mem.set_32(addr, tid as u32);
 
                         // setup allocated core's register file
                         let mut regs = [0;32];
-                        regs[2] = stackstart as i32 - 1;
-                        regs[8] = stackstart as i32 - 1;
+                        regs[2] = stackstart as i32;
+                        regs[8] = stackstart as i32;
                         regs[3] = self.warps[wid].cores[cid].registers[3];
                         regs[4] = tid as i32;
                         self.warps[w].cores[t].registers = regs;
@@ -692,19 +841,8 @@ impl MultiCoreIMachine for Machine {
                     } else if func_name.contains("pthread_join") {
                         let cid = self.warps[wid].get_single_core_id();
                         let to_wait = self.warps[wid].cores[cid].registers[10] as usize;
-                        let w_to_wait = to_wait / tpw;
-                        let c_to_wait = to_wait % tpw;
-                        let cp = self.warps[w_to_wait].current_path;
-
-                        let p = self.warps[w_to_wait].get_path_of_core_mut(c_to_wait);
-                        if p.fetch_pc == 0 {
-                            p.execution_mask.unset(c_to_wait);
-                            let is_0 = p.execution_mask == 0;
+                        if self.idle_threads.contains(&to_wait) {
                             self.warps[wid].paths[pathid].fetch_pc += advance;
-                            self.push_idle(to_wait);
-                            if is_0 {
-                                self.warps[w_to_wait].paths.remove(cp);
-                            }
                         }
                     } else if func_name.contains("pthread_barrier_init") {
                         let cid = self.warps[wid].get_single_core_id();
@@ -738,12 +876,12 @@ impl MultiCoreIMachine for Machine {
                                 // then stop the loop
                                 if barr.current_cap == 0 {
                                     barr.current_cap = barr.initial_cap;
-                                    self.free_barrier(ptr);
+                                    self.free_barrier(ptr, advance);
                                     break;
                                 }
                             }
                         }
-                    } else if func_name.contains("puts") {
+                    } else if func_name.contains("puts") || func_name.contains("printf") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let mut str_addr = self.warps[wid].cores[i].registers[10] as usize;
                             let mut byte = mem.get_8(str_addr); let mut s = String::new();
@@ -774,7 +912,7 @@ impl MultiCoreIMachine for Machine {
 
                         let id = ids[0];
                         let core = &self.warps[wid].cores[id];
-                        let function = core.registers[10];
+                        let _function = core.registers[10];
                     } else if func_name.contains("omp_get_num_threads") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let num_warps = self.warps.len();
@@ -786,7 +924,7 @@ impl MultiCoreIMachine for Machine {
                         for i in self.warps[wid].alive_cores_ids() {
                             let core = &mut self.warps[wid].cores[i];
                             let tid = wid*tpw + i;
-                            //println!("core {} omp_get_thread_num", wid);
+                            //println!("core {} omp_get_thread_num = {}", wid, tid);
                             core.registers[10] = tid as i32;
                         }
                         self.warps[wid].paths[pathid].fetch_pc += advance;
@@ -807,11 +945,12 @@ impl MultiCoreIMachine for Machine {
                                 byte = mem.get_8(str_addr as usize);
                             }
         
-                            //println!("strtol(\"{}\")", to_parse);
-                            core.registers[10] = to_parse.parse()
+                            let parsed = to_parse.parse()
                                 .expect(format!("couldnt parse {} to int", to_parse).as_str());
-                        }
+                            //println!("strtol(\"{}\") = {}", to_parse, parsed);
 
+                            core.registers[10] = parsed;
+                        }
                         self.warps[wid].paths[pathid].fetch_pc += advance;
                     } else if func_name.contains("fwrite") {
                         for i in self.warps[wid].alive_cores_ids() {
@@ -840,11 +979,19 @@ impl MultiCoreIMachine for Machine {
                 } else {
                     self.warps[wid].execute(mem.deref_mut())
                 }
+            } else if i.get_opcode_enum() == OpCode::SYSTEM {
+                //let csr = CsrId::from(i.get_imm_i() as u16);
+                //let rs1 = i.get_rs1() as usize;
+                let rd = i.get_rd() as usize;
+                self.warps[wid].for_each_core_alive_i(|i, c| {
+                    let v = i + wid*tpw;
+                    c.registers[rd] = v as i32;
+                    println!("HartId of core {} is {}", i, v);
+                });
+                self.warps[wid].paths[pathid].fetch_pc += advance;
             } else {
                 self.warps[wid].execute(mem.deref_mut())
             }
-        //let new14 = self.warps[wid].cores[0].registers[14];
-        //if old14 != new14 { println!("0x{:x} th[{}].a4 changed from {:x} to {:x} because of {}", pc, wid, old14, new14, i) }
         }
 
         let new_gp = self.warps[0].cores[0].registers[3];

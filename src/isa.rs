@@ -555,7 +555,7 @@ impl Instruction {
     /// backward. If a jump is backward, we know it is part of a loop or a
     /// recursive call. Very useful for SIMTX as it wants to understand where
     /// loops are in order to optimize its scheduling algorithm.
-    pub fn jump_offset(&self, ) -> i32 {
+    pub fn jump_offset(&self) -> i32 {
         match self.get_opcode_enum() {
             OpCode::JAL => self.get_imm_j(),
             OpCode::BRANCH => self.get_imm_b(),
