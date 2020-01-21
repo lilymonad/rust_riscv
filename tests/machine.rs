@@ -1,21 +1,14 @@
 extern crate elf as elflib;
 extern crate riscv_sandbox;
 
-use riscv_sandbox::memory::Memory;
 use riscv_sandbox::machine::{rv32imc::Machine as RV32I
     //, rv32pthread::Machine as RV32Threaded
     , simtx::Machine as SIMTX
     , *
     , self};
 use riscv_sandbox::isa::{Instruction, OpCode};
-use riscv_sandbox::elf;
 
-use std::collections::{HashMap, BTreeMap};
-
-use std::fs::{self, *};
-use std::io::{BufReader, BufRead};
-
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap};
 
 #[test]
 fn registers() {
@@ -220,5 +213,5 @@ fn fibonacci() {
 #[test]
 #[should_panic]
 fn simtx_too_many_tpw() {
-    let machine = SIMTX::new(machine::simtx::MAX_TPW + 1, 1, HashMap::new());
+    let _ = SIMTX::new(machine::simtx::MAX_TPW + 1, 1, HashMap::new());
 }

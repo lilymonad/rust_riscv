@@ -5,6 +5,14 @@ authors = ["Arthur Blanleuil <arthur.blanleuil@inria.fr>"]
 description = "RISC-V implementation for educational purpose."
 license = "MIT"
 
+[profile.dev]
+opt-level=0
+debug=true
+
+[profile.release]
+opt-level=3
+debug=false
+
 [dependencies]
 elf = "^0.0.10"
 crossbeam = "*"

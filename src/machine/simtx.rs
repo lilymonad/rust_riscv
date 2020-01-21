@@ -1,5 +1,5 @@
 use machine::MultiCoreIMachine;
-use isa::{Instruction, OpCode, CsrId};
+use isa::{Instruction, OpCode/*, CsrId*/};
 use memory::*;
 use types::{MachineInteger, BitSet, BoolIterator};
 use std::sync::{Arc, Mutex};
@@ -431,6 +431,9 @@ impl Warp {
                         1 => mem.set_16(addr, src as u16),
                         2 => mem.set_32(addr, src as u32),
                         _ => panic!("STORE: Bad word width"), // ERROR
+                    };
+                    if pc == 0x6f8 || pc == 0x710 {
+                        println!("carray store {:x}: ({:08x}) = {:08x}", pc, addr, src);
                     }
                 });
             },
@@ -445,15 +448,15 @@ impl Warp {
                                 else { inst.get_imm_i() };
 
                     core.registers[dst] = match inst.get_funct3() {
-                        0b000 => v1.wrapping_add(v2),
-                        0b010 => (v1 < v2) as i32,
-                        0b011 => ((v1 as u32) < v2 as u32) as i32,
-                        0b100 => v1 ^ v2,
-                        0b110 => v1 | v2,
-                        0b111 => v1 & v2,
-                        0b001 => v1 << v2,
-                        0b101 => if inst.get_funct7() != 0 { v1 >> v2 }
-                                 else { ((v1 as u32) >> v2) as i32 },
+                        0b000 => v1.wrapping_add(v2),              // ADDI
+                        0b010 => (v1 < v2) as i32,                 // SLTI
+                        0b011 => ((v1 as u32) < v2 as u32) as i32, // SLTIU
+                        0b100 => v1 ^ v2,  // XORI
+                        0b110 => v1 | v2,  // ORI
+                        0b111 => v1 & v2,  // ANDI
+                        0b001 => v1 << v2, // SLLI
+                        0b101 => if inst.get_funct7() != 0 { v1 >> v2 } // SRAI
+                                 else { ((v1 as u32) >> v2) as i32 },   // SRAIU
                         _ => 0, // Cannot be here, because funct3 is on 3 bits
                     };
                     //if dst == 2 { println!("{} -> r2 = 0x{:08x}", inst, core.registers[dst]) }
@@ -477,13 +480,13 @@ impl Warp {
                     core.registers[dst] = match inst.get_funct7() {
                         0b0000000 => match inst.get_funct3() {
                             0b000 => v1.wrapping_add(v2),
-                            0b001 => v1 >> v2,
-                            0b010 => (v1 < v2) as i32,
-                            0b011 => ((v1 as u32) < v2 as u32) as i32,
-                            0b100 => v1 ^ v2,
-                            0b101 => ((v1 as u32) >> v2) as i32,
-                            0b110 => v1 | v2,
-                            0b111 => v1 & v2,
+                            0b001 => v1 << v2, // SLL
+                            0b010 => (v1 < v2) as i32, // SLT
+                            0b011 => ((v1 as u32) < v2 as u32) as i32, // SLTU
+                            0b100 => v1 ^ v2, // XOR
+                            0b101 => ((v1 as u32) >> v2) as i32, // SRL
+                            0b110 => v1 | v2, // OR
+                            0b111 => v1 & v2, // AND
                             _ => 0, // Cannot be here, because funct3 is on 3 bits
                         },
                         0b0000001 => match inst.get_funct3() {
@@ -498,8 +501,8 @@ impl Warp {
                             _ => 0,
                         },
                         0b0100000 => match inst.get_funct3() {
-                            0b000 => v1.wrapping_sub(v2),
-                            0b101 => v1 >> v2,
+                            0b000 => v1.wrapping_sub(v2), // SUB
+                            0b101 => v1 >> v2, // SRA
                             _ => 0, // TODO handle bad funct3 values
                         },
                         _ => 0, // TODO add other extensions (F has priority)
@@ -554,7 +557,6 @@ pub struct Machine {
     // Our cores
     warps:Vec<Warp>,
 
-
     // For dynamic library calls emulation
     plt_addresses:HashMap<i32, String>,
 
@@ -574,6 +576,10 @@ pub struct Machine {
 
     // For execution analysis
     loop_data: HashMap<i32, LoopData>,
+
+    // 32bits unsigned words for thread stack allocation
+    stack_start: usize,
+    stack_size: usize,
 }
 
 impl Machine {
@@ -604,7 +610,19 @@ impl Machine {
             heap_ptr:0x10000000,
             heap_elements:BTreeMap::new(),
             loop_data:HashMap::new(),
+
+            // default stack size and place
+            // it is 128 * 2Kio bytes stacks starting at 0x10000000
+            stack_start: 0x20000000,
+            stack_size: 0x00200000,
         }
+    }
+
+    pub fn place_stack(&mut self, text_end:usize, stack_size:usize) {
+        self.stack_start =
+            text_end +
+            self.warps.len() * self.warps[0].cores.len() * stack_size;
+        self.stack_size = stack_size;
     }
 
     fn malloc(&mut self, mem:&mut dyn Memory, size:usize) -> usize {
@@ -779,7 +797,7 @@ impl MultiCoreIMachine for Machine {
                 (4, i)
             };
 
-            println!("warp {} 0x{:x} :: {}", wid, pc, i);
+            println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
         
             // Update back-branch stats
             if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {
@@ -811,8 +829,8 @@ impl MultiCoreIMachine for Machine {
                         let tid = self.pop_first_idle();
                         let w = tid / tpw; let t = tid % tpw;
 
-                        let stacksize = 0x00200000;
-                        let stackstart = 0x0ff00000 - (0x00200000 * tid); 
+                        let stacksize = self.stack_size;
+                        let stackstart = self.stack_start - stacksize * tid; 
                         let stackend = stackstart - stacksize;
                         mem.allocate_at(stackend, stacksize);
 
@@ -986,7 +1004,7 @@ impl MultiCoreIMachine for Machine {
                 self.warps[wid].for_each_core_alive_i(|i, c| {
                     let v = i + wid*tpw;
                     c.registers[rd] = v as i32;
-                    println!("HartId of core {} is {}", i, v);
+                    println!("HartId of core {} is {}, put v in r{}", i, v, rd);
                 });
                 self.warps[wid].paths[pathid].fetch_pc += advance;
             } else {

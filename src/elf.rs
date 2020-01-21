@@ -1,34 +1,20 @@
 use std::collections::HashMap;
 use memory::Memory;
 
-/// Use the function to load code (`.text` section) into a memory buffer.
-pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> bool {
-    file.get_section(".text").map_or(false, | text | -> bool {
-        let mut i = 0;
-
-        println!("Allocating words starting from {:x} with size {}", text.shdr.addr, text.data.len());
-        mem.allocate_at(text.shdr.addr as usize, text.data.len());
-
-        while i < text.data.len() {
-            let x = if file.ehdr.data == elflib::types::ELFDATA2LSB {
-                u16::from_le(text.data.get_16(i))
-            } else {
-                u16::from_be(text.data.get_16(i))
-            };
-
-            let addr = (text.shdr.addr as usize) + i;
-            mem.set_16(addr, x);
-
-            i += 2
-        }
-
-        true
-    })
+/// Helper for `load_section(file, ".text", mem)`
+pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> Option<(usize, usize)> {
+    load_section(file, ".text", mem)
 }
 
-/// Use this function to load `.rodata` section into a memory buffer.
-pub fn load_rodata(file:&elflib::File, mem:&mut dyn Memory) -> bool {
-    file.get_section(".rodata").map_or(false, | section | -> bool {
+/// Helper for `load_section(file, ".rodata", mem)`
+pub fn load_rodata(file:&elflib::File, mem:&mut dyn Memory) -> Option<(usize, usize)> {
+    load_section(file, ".rodata", mem)
+}
+
+/// Load a specific section from the file into the `mem` Memory. The section is
+/// loaded at the memory offset specified in the file.
+pub fn load_section(file:&elflib::File, section:&str, mem:&mut dyn Memory) -> Option<(usize, usize)> {
+    file.get_section(section).map_or(None, | section | -> Option<(usize, usize)> {
         let mut rodata_i = section.shdr.addr as usize;
 
         mem.allocate_at(rodata_i, section.data.len());
@@ -37,23 +23,12 @@ pub fn load_rodata(file:&elflib::File, mem:&mut dyn Memory) -> bool {
             rodata_i += 1
         }
 
-        true
+        let beg = section.shdr.addr as usize;
+        let end = beg + section.data.len() as usize;
+        Some((beg, end))
     })
 }
 
-pub fn load_section(file:&elflib::File, section:&str, mem:&mut dyn Memory) -> bool {
-    file.get_section(section).map_or(false, | section | -> bool {
-        let mut rodata_i = section.shdr.addr as usize;
-
-        mem.allocate_at(rodata_i, section.data.len());
-        for byte in &section.data {
-            mem.set_8(rodata_i, *byte);
-            rodata_i += 1
-        }
-
-        true
-    })
-}
 /// Use this function to retrieve the mapping of linked functions addresses to
 /// their name. Useful when emulating `libc` calls.
 pub fn get_plt_symbols(file:&elflib::File) -> Option<HashMap<i32, String>> {
@@ -70,7 +45,6 @@ pub fn get_plt_symbols(file:&elflib::File) -> Option<HashMap<i32, String>> {
 
     Some(ret)
 }
-
 
 /// Use this function to retrieve the address of a binary symbol in the elf.
 pub fn get_main_pc(file:&elflib::File) -> Option<i32> {
@@ -101,17 +75,18 @@ pub fn get_symbol_address(file:&elflib::File, symbol:&str) -> Option<i32> {
     None
 }
 
-/// Use this function to load an entier `.elf` file in memory. Every needed
-/// sections are loaded in memory. For now this function doesn't load 
-/// dynamic libraries. It will in a future version.
-pub fn load_program(file:&elflib::File, mem:&mut dyn Memory) -> bool {
+/// Use this function to load a while `.elf` file in memory. Every needed
+/// sections are loaded in memory.
+pub fn load_program(file:&elflib::File, mem:&mut dyn Memory) -> Option<(usize, usize)> {
+    let mut beg : usize = 0;
+    let mut end : usize = 0;
     for section in &file.sections {
         let addr = section.shdr.addr as usize;
         if addr == 0 { continue }
 
-        if !load_section(file, section.shdr.name.as_str(), mem) {
-            return false
-        }
+        let (a, b) = load_section(file, section.shdr.name.as_str(), mem)?;
+        beg = if beg == 0 || beg > a { a } else { beg };
+        end = if end == 0 || end < b { b } else { end };
     }
-    false
+    Some((beg, end))
 }

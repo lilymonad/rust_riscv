@@ -117,14 +117,18 @@ impl Instruction {
     pub fn bge(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 5) }
     pub fn bltu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 6) }
     pub fn bgeu(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_b(OpCode::BRANCH, rs1, rs2, imm, 7) }
-    pub fn lb(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 0) }
-    pub fn lh(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 1) }
-    pub fn lw(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 2) }
-    pub fn lbu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 4) }
-    pub fn lhu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::LOAD, rd, rs1, imm, 5) }
-    pub fn sb(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE, rs1, rs2, imm, 0) }
-    pub fn sh(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE, rs1, rs2, imm, 1) }
-    pub fn sw(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::create_s(OpCode::STORE, rs1, rs2, imm, 2) }
+    pub fn load(rd:u8, rs1:u8, imm:i32, width:u8) -> Instruction
+        { Self::create_i(OpCode::LOAD, rd, rs1, imm, width) }
+    pub fn lb(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::load(rd, rs1, imm, 0) }
+    pub fn lh(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::load(rd, rs1, imm, 1) }
+    pub fn lw(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::load(rd, rs1, imm, 2) }
+    pub fn lbu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::load(rd, rs1, imm, 4) }
+    pub fn lhu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::load(rd, rs1, imm, 5) }
+    pub fn store(rs1:u8, rs2:u8, imm:i32, width:u8) -> Instruction
+        { Self::create_s(OpCode::STORE, rs1, rs2, imm, width) }
+    pub fn sb(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::store(rs1, rs2, imm, 0) }
+    pub fn sh(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::store(rs1, rs2, imm, 1) }
+    pub fn sw(rs1:u8, rs2:u8, imm:i32) -> Instruction { Self::store(rs1, rs2, imm, 2) }
     pub fn addi(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 0) }
     pub fn slti(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 2) }
     pub fn sltiu(rd:u8, rs1:u8, imm:i32) -> Instruction { Self::create_i(OpCode::OPIMM, rd, rs1, imm, 3) }
@@ -416,6 +420,20 @@ impl Instruction {
             OpCode::SYSTEM => { match self.get_funct7() {
                 _ => "sys",
             } },
+            OpCode::AMO => { match self.get_funct7() | 0b1111100 {
+                0b0001000 => "lr.w",
+                0b0001100 => "sc.w",
+                0b0000100 => "amoswap.w",
+                0b0000000 => "amoadd.w",
+                0b0010000 => "amoxor.w",
+                0b0110000 => "amoand.w",
+                0b0100000 => "amoor.w",
+                0b1000000 => "amomin.w",
+                0b1010000 => "amomax.w",
+                0b1100000 => "amominu.w",
+                0b1110000 => "amomaxu.w",
+                _ => "illegal",
+            } },
             OpCode::INVALID => "illegal",
         }
     }
@@ -658,6 +676,7 @@ pub enum OpCode {
     FENCE  ,
     SYSTEM ,
     INVALID,
+    AMO    ,
 }
 
 impl Into<Type> for OpCode {
@@ -712,6 +731,7 @@ impl Into<u8> for OpCode {
             OpCode::OPREG   => 0b0110011,
             OpCode::FENCE   => 0b0001111,
             OpCode::SYSTEM  => 0b1110011,
+            OpCode::AMO     => 0b0101111,
             OpCode::INVALID => 0,
         }
     }

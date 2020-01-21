@@ -13,6 +13,7 @@ pub struct Machine {
     active_threads : usize,
     cycles : i32,
     plt_addresses : HashMap<i32, String>,
+    reservations : [ i32 ; 4 ],
 }
 
 impl Machine {
@@ -25,6 +26,7 @@ impl Machine {
             active_threads : 1,
             cycles : 0,
             plt_addresses : plt,
+            reservations : [ 0 ; 4 ],
         };
 
         let mut i = 0;
@@ -150,6 +152,21 @@ impl Machine {
                 }
             } else {
                 self.cores[curr].do_execute()
+            }
+        } else if i.get_opcode() == OpCode::AMO.into() {
+            match i.get_funct7() | 0b1111100 {
+                0b0001000 => {
+                    let rd = i.get_rd();
+                    let addr = i.get_rs1();
+                    let width = i.get_funct3();
+                    self.reservations[curr] = addr as i32;
+                    self.cores[curr].dc2ex.instruction =
+                        Instruction::load(rd, addr, 0, width);
+
+                    self.cores[curr].do_execute()
+                },
+                // TODO: Implementer au minimum SC
+                _ => {},
             }
         } else {
             self.cores[curr].do_execute()

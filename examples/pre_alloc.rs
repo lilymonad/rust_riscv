@@ -20,29 +20,32 @@ fn main() {
 
     // get number of warps arg
     let nb_warps : usize = args.next().and_then(|s| s.parse().ok())
-        .expect("[ERR] You need to provide the number of warps");
+        .expect("You need to provide the number of warps");
 
     let monitored_pc : Option<usize> = args.next().and_then(|s| { s.parse().ok() }).map(|v| {
         if v == 0 { None } else { Some(v) }
-    }).expect("[ERR] You need to provide a pc to monitor (0 to monitor all)");
+    }).expect("You need to provide a pc to monitor (0 to monitor all)");
 
     // get exec path and parse executable file
     let exec_path = args.next().expect("You need to give an executable");
     let file = elflib::File::open_path(&exec_path)
-        .expect("[ERR] ELF file not found");
+        .expect("ELF file not found");
 
     let calls = elf::get_plt_symbols(&file)
         .unwrap_or(HashMap::new());
     let pc = elf::get_main_pc(&file)
-        .expect("[ERR] This ELF file has no function named 'main'");
+        .expect("This ELF file has no function named 'main'");
 
+    // number of threads
     let nb_th = tpw * nb_warps;
 
     // create some memory buffer to load instructions and rodata
     let memory = Arc::new(Mutex::new(BTreeMap::new()));
     let stacksize = 0x00200000;//0x800
-    let stackstart;// = 0x0ff00000;
-    let stackend;// = stackstart - stacksize;
+    let stackstart;
+    let stackend;
+
+    // Memory initialization
     {
         let mut memory = memory.lock().unwrap();
         let (pbeg, pend) = elf::load_program(&file, memory.deref_mut()).unwrap();
@@ -52,33 +55,35 @@ fn main() {
         println!("[SIM] Program sits on memory range {:x}-{:x} ({} bytes).", pbeg, pend, pend - pbeg);
         println!("[SIM] Stack bottom sits at {:x}", stackstart);
 
-        memory.allocate_at(stackstart - stacksize, stacksize);
+        memory.allocate_at(stackend, 32 * stacksize);
 
         if let Some(addr) = elf::get_symbol_address(&file, "stderr") {
-            println!("[SIM] Found stderr at {:x}, writing 2 at this address", addr);
+            println!("Found stderr at {:x}, writing 2 at this address", addr);
             memory.set_32(addr as usize, 2);
         }
         if let Some(addr) = elf::get_symbol_address(&file, "stdout") {
-            println!("[SIM] Found stdout at {:x}, writing 2 at this address", addr);
+            println!("Found stdout at {:x}, writing 2 at this address", addr);
             memory.set_32(addr as usize, 0);
         }
     }
 
     // create the machine and set it up
     let mut machine = SIMTX::new(tpw, nb_warps, calls);
+    machine.place_stack(stackend, stacksize);
+
     println!("[SIM] Setting pc to 0x{:x}", pc as usize);
 
+
+    // Setup C specific argc/argv
+    let mut argc = 1;
+    let mut argv = vec![exec_path.clone()];
     {
-        // Compute argc and argv
         let mut memory = memory.lock().unwrap();
-        let mut argc = 1;
-        let mut argv = vec![exec_path.clone()];
         while let Some(s) = args.next() {
             argv.push(s);
             argc += 1;
         }
 
-        // compute argv byte per byte 
         let mut first_ptr = 0x100;
         let mut ptrs = vec![first_ptr];
         let mut argvdata = String::new();
@@ -88,8 +93,6 @@ fn main() {
             argvdata += &(v + "\0");
         }
 
-        // allocate argv memory chunk
-        // and store it at 0x10
         memory.allocate_at(0, 4096);
         let mut i = 0x100;
         for c in argvdata.bytes() {
@@ -102,14 +105,21 @@ fn main() {
             i += 4;
         }
 
-        // setup core[0] registers
+        // Allocation for Alexandre's programs memory
+        memory.allocate_at(0x10010000, 2048*4*2);
+        memory.allocate_at(0x20000000, 0x100000);
+    }
+
+    // Setup SP/PC/argc/argv register for all cores
+    for _i in 0..nb_th {
         let c = machine.pop_first_idle();
         machine.set_pc_of(c, pc);
-        machine.set_i_register_of(c, 1, 0);
-        machine.set_i_register_of(c, 2, stackstart as i32);
+        println!("[SIM] Setting sp of core {} to 0x{:08x}", c, (stackstart - c * stacksize) as i32);
+        machine.set_i_register_of(c, 1, 0);    // must be 0
+        machine.set_i_register_of(c, 2, (stackstart - c * stacksize) as i32); // sp
         machine.set_i_register_of(c, 3, 0x1206c + 1940);
-        machine.set_i_register_of(c, 10, argc);
-        machine.set_i_register_of(c, 11, 0x14);
+        machine.set_i_register_of(c, 10, argc); // argc
+        machine.set_i_register_of(c, 11, 0x14); // argv
     }
 
     let mut i = 0;
@@ -124,11 +134,23 @@ fn main() {
         }
     }
 
+    /*for (key, chunk) in memory.iter() {
+        let mut k = *key;
+        for v in chunk.iter() {
+            println!("{} {}", k, v);
+            k = k.wrapping_add(4)
+        }
+    }*/
+
     if let Some(pc) = monitored_pc {
         machine.print_stats_for_pc(pc);
     } else {
         machine.print_stats();
     }
 
+    for i in 0..2048 {
+        let addr = 0x10010000 /*0x20000000*/ + i*4;
+        println!("@{:08x}: 0x{:08x}", addr, memory.lock().unwrap().get_32(addr));
+    }
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register_of(0, 10));
 }

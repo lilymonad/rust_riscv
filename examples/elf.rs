@@ -25,10 +25,10 @@ fn main() {
 
     // create some memory buffer to load instructions and rodata
     let mut memory : BTreeMap<usize, [u8;4096]> = BTreeMap::new();
-    assert!(elf::load_instructions(&file, &mut memory)
+    assert!(elf::load_instructions(&file, &mut memory).is_some()
             , "This ELF file has no .text section");
 
-    if !elf::load_rodata(&file, &mut memory) {
+    if !elf::load_rodata(&file, &mut memory).is_some() {
             println!("This ELF file has no .rodata section");
     }
 
