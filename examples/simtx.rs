@@ -1,5 +1,9 @@
 extern crate elf as elflib;
 extern crate riscv_sandbox;
+#[macro_use]
+extern crate clap;
+
+use clap::Values;
 
 use riscv_sandbox::elf;
 use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX};
@@ -10,24 +14,34 @@ use std::env;
 use std::sync::{Arc, Mutex};
 use std::ops::DerefMut;
 
+fn is_usize(s:String) -> Result<(), String> {
+    s.parse::<usize>().map_err(|e| String::from("Must be a number")).map(|_| ())
+}
+
 fn main() {
 
-    let mut args = env::args(); args.next();
+    let conf = clap_app!(myapp =>
+        (version: "1.0")
+        (author: "Arthur Blanleuil")
+        (about: "A simple example of clap usage")
+        (@arg TPW: +required +takes_value {is_usize} "Sets the number of threads per warps")
+        (@arg NBW: +required +takes_value {is_usize} "Sets the number of warps")
+        (@arg monitored: -m --monitor [pc]... "Provide a list of pc to parse")
+        (@arg command: * ... "The command to run")
+    ).get_matches();
 
-    // get threads per warp arg
-    let tpw : usize = args.next().and_then(|s| s.parse().ok())
-        .expect("You need to provide the number of threads per warp");
+    let tpw : usize = conf.value_of("TPW").unwrap().parse()
+        .expect("TPW must be a number");
+    let nb_warps : usize = conf.value_of("NBW").unwrap().parse()
+        .expect("NBW must be a number");
 
-    // get number of warps arg
-    let nb_warps : usize = args.next().and_then(|s| s.parse().ok())
-        .expect("[ERR] You need to provide the number of warps");
+    let monitored_pc = conf.values_of("monitored")
+        .or(Some(Values::default())).unwrap();
 
-    let monitored_pc : Option<usize> = args.next().and_then(|s| { s.parse().ok() }).map(|v| {
-        if v == 0 { None } else { Some(v) }
-    }).expect("[ERR] You need to provide a pc to monitor (0 to monitor all)");
+    let mut args = conf.values_of("command").unwrap();
 
     // get exec path and parse executable file
-    let exec_path = args.next().expect("You need to give an executable");
+    let exec_path = args.next().unwrap();
     let file = elflib::File::open_path(&exec_path)
         .expect("[ERR] ELF file not found");
 
@@ -74,7 +88,7 @@ fn main() {
         let mut argc = 1;
         let mut argv = vec![exec_path.clone()];
         while let Some(s) = args.next() {
-            argv.push(s);
+            argv.push(s.into());
             argc += 1;
         }
 
@@ -85,7 +99,7 @@ fn main() {
         for v in argv {
             ptrs.push(first_ptr);
             first_ptr += v.len() + 1;
-            argvdata += &(v + "\0");
+            argvdata += &(String::from(v) + "\0");
         }
 
         // allocate argv memory chunk
@@ -124,10 +138,8 @@ fn main() {
         }
     }
 
-    if let Some(pc) = monitored_pc {
-        machine.print_stats_for_pc(pc);
-    } else {
-        machine.print_stats();
+    for pc in monitored_pc {
+        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
     }
 
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register_of(0, 10));
