@@ -1,4 +1,4 @@
-mod scheduler;
+pub mod scheduler;
 mod implem;
 
 pub use machine::simtx::implem::Machine as Machine;

@@ -24,5 +24,3 @@ pub mod types;
 /// Helper functions for elf file reading.
 pub mod elf;
 
-/// Helper functions for command-line arguments
-pub mod args;
