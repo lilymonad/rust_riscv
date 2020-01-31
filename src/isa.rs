@@ -712,6 +712,7 @@ impl From<u8> for OpCode {
             0b0110011 => OpCode::OPREG,
             0b0001111 => OpCode::FENCE,
             0b1110011 => OpCode::SYSTEM,
+            0b0101111 => OpCode::AMO,
             _ => OpCode::INVALID,
         }
     }

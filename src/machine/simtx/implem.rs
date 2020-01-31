@@ -1,19 +1,26 @@
-use machine::MultiCoreIMachine;
-use isa::{Instruction, OpCode/*, CsrId*/};
+use machine::{
+    MultiCoreIMachine,
+};
+use machine::simtx::scheduler::SimtxScheduler;
+use isa::{Instruction, OpCode, CsrId};
 use memory::*;
 use types::{MachineInteger, BitSet, BoolIterator};
-use std::sync::{Arc, Mutex};
-use std::fmt;
-use std::ops::DerefMut;
-use std::collections::{HashMap, BTreeMap};
+use std::{
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+    fmt,
+    ops::DerefMut,
+    collections::{HashMap, BTreeMap},
+};
 
 type BitVec = u32;
 pub static MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
 
 /// Defines the state of a single hardware thread.
 #[derive(Clone)]
-struct Core {
+pub struct Core {
     pub registers: [ i32; 32 ],
+    pub fregisters: [ f32; 32 ],
 }
 
 /// Defines a SIMT Path. As threads are grouped in `Warp`s executed in lockstep,
@@ -21,7 +28,7 @@ struct Core {
 /// `(fetch_pc, execution_mask)` tuple. Before fetching instructions, we chose
 /// a `Path` to advance.
 #[derive(Clone, Copy, Debug)]
-struct Path {
+pub struct Path {
     pub fetch_pc : i32,
     pub execution_mask : BitVec,
     pub waiting_for_sync : BitVec,
@@ -50,13 +57,13 @@ impl fmt::Display for Path {
 }
 
 #[derive(Debug, Clone)]
-enum BranchOutcome<BV:BitSet> {
+pub enum BranchOutcome<BV:BitSet> {
     Uniform(bool, BV),
     Divergent(BV, BV),
 }
 
 #[derive(Debug, Clone)]
-struct CondBranchData {
+pub struct CondBranchData {
     times_passed:usize,
     taken_hist:Vec<BranchOutcome<BitVec>>,
 }
@@ -64,23 +71,24 @@ struct CondBranchData {
 /// Defines a hardware warp (a group of threads) which all execute instructions
 /// in an SIMD fasion.
 #[derive(Clone)]
-struct Warp {
+pub struct Warp<S:SimtxScheduler> {
     pub cores: Vec<Core>,
     pub paths: Vec<Path>,
     pub current_path: usize,
     pub cycles_since_last_schedule: usize,
 
     // Log variables
-    branch_mask_hist: HashMap<i32, Vec<BitVec>>,
-    thresholds: usize,
-    fusions: usize,
-    cond_branch_data: HashMap<i32, CondBranchData>,
+    pub branch_mask_hist: HashMap<i32, Vec<BitVec>>,
+    pub thresholds: usize,
+    pub fusions: usize,
+    pub cond_branch_data: HashMap<i32, CondBranchData>,
+    scheduler:PhantomData<S>,
 }
 
-impl Warp {
-    pub fn new(tpw:usize) -> Warp {
+impl<S:SimtxScheduler> Warp<S> {
+    pub fn new(tpw:usize) -> Warp<S> {
         let mut cores = Vec::new();
-        cores.resize(tpw, Core { registers : [ 0; 32 ] });
+        cores.resize(tpw, Core { registers : [ 0; 32 ], fregisters: [ 0.0; 32 ] });
         Warp {
             cores,
             paths: Vec::new(),
@@ -90,6 +98,7 @@ impl Warp {
             fusions: 0,
             cond_branch_data: HashMap::new(),
             cycles_since_last_schedule: 0,
+            scheduler:PhantomData,
         }
     }
 
@@ -120,6 +129,36 @@ impl Warp {
         panic!("A path is empty")
     }
 
+
+
+    fn probas(&self) -> Vec<f32> {
+        let ps = &self.paths;
+
+        let raw : Vec<f32> = ps
+            .into_iter()
+            .enumerate()
+            .map(|(i,p)| {
+                ps
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(j,_)| i != *j)
+                    .fold(0., |v, (j,pp)| {
+                        let decrease_factor = 1;
+                        v + 1. / ((pp.fetch_pc as f32) - p.fetch_pc as f32)
+                            .abs()
+                            .powi(decrease_factor)
+                    })
+            }).collect();
+
+        let total : f32 = (&raw).into_iter().sum();
+        raw
+            .into_iter()
+            .map(|v| v/total)
+            .collect()
+    }
+
+
+
     /// This function should be called right before any FETCH step of the `Warp`
     /// to ensure we always execute a valid path.
     ///
@@ -127,96 +166,16 @@ impl Warp {
     /// to the scheduling rule, but also fusion paths with the same PC.
     pub fn schedule_path(&mut self) {
 
-        let schedule_trigger = 16;
 
-        if self.paths.is_empty() { 
-            self.current_path = 0xFFFFFFFF;
-            self.cycles_since_last_schedule = schedule_trigger;
-        } else {
+        //**TODO:
+        //* avoir une boite "priorite" qui calcule la prio de scheduling des chemins
+        //* definir les bons criteres pour cette boite
+        //*
+        //* scheduler avec une "fenetre de temps" qu'on peuple et parcour en fct de cette
+        //* fonction de probabilite/priorite
+        //*/
 
-            // old_pc is:
-            // - None if we destroyed the last path
-            // - Some(x) if we still have the last path, in order to retrieve it
-            //      after fusion
-            let old_pc = if self.current_path != 0xFFFFFFFF {
-                Some(self.paths[self.current_path].fetch_pc)
-            } else { None };
-
-            // Fusion of path with the same PC
-            let mut fusionned = HashMap::new();
-            let mut fusion = false;
-            for p in &self.paths {
-                if let Some(lhs) = fusionned.get_mut(&p.fetch_pc) {
-                    *lhs |= p.execution_mask;
-                    fusion = true;
-                } else {
-                    fusionned.insert(p.fetch_pc, p.execution_mask);
-                }
-            }
-
-            // If fusion occurred, rebuild the path table
-            // + reset current_path to the good path
-            if fusion {
-                self.fusions += 1;
-                let mut npaths = Vec::new();
-                for (k, v) in fusionned {
-                    if let Some(pc) = old_pc {
-                        if k == pc {
-                            self.current_path = npaths.len();
-                        }
-                    }
-                    npaths.push(Path::from_pc_mask(k, v));
-                }
-                self.paths = npaths;
-            }
-
-            // only schedule if we passed the "schedule threshold" or if the last
-            // path we scheduled just died
-            if !(  self.cycles_since_last_schedule >= schedule_trigger
-                || old_pc.is_none())
-            {
-                self.cycles_since_last_schedule += 1;
-                return
-            }
-
-            // when re-scheduling, reset the cycle counter
-            self.cycles_since_last_schedule = 0;
-
-            // gather threads which reached the idle threshold
-            let idle_threshold = 4;
-            let mut too_idle = Vec::new();
-            for i in 0..self.paths.len() {
-                if self.paths[i].time_since_scheduled > idle_threshold {
-                    too_idle.push(i);
-                }
-            }
-
-            // work_on represents the list of every path which are eligible for
-            // scheduling
-            //
-            // if we have idle threads, work_on represent only those idle threads
-            // if we don't, we just iterate over all threads
-            let work_on = if too_idle.is_empty() { (0..self.paths.len()).collect() } else { too_idle };
-            let work_on : Vec<usize> = work_on.into_iter().filter(|i| {
-                self.paths[*i].fetch_pc != 0
-            }).collect();
-            self.current_path = work_on[0];
-
-            // [min pc] over only eligible threads
-            for i in work_on {
-                // compute the path with the minimum pc
-                let ipc = self.paths[i].fetch_pc;
-                if ipc < self.paths[self.current_path].fetch_pc {
-                    self.current_path = i
-                }
-            }
-
-            // for each not-chosen path, increment their idle time
-            for i in 0..self.paths.len() {
-                if i == self.current_path { self.paths[i].time_since_scheduled = 0 }
-                else { self.paths[i].time_since_scheduled += 1 }
-            }
-        }
+        S::schedule(self)
     }
 
     /// This function is a helper used to work on all alive threads of the
@@ -432,9 +391,6 @@ impl Warp {
                         2 => mem.set_32(addr, src as u32),
                         _ => panic!("STORE: Bad word width"), // ERROR
                     };
-                    if pc == 0x6f8 || pc == 0x710 {
-                        println!("carray store {:x}: ({:08x}) = {:08x}", pc, addr, src);
-                    }
                 });
             },
             OpCode::OPIMM => {
@@ -524,7 +480,7 @@ impl Warp {
     }
 }
 
-impl fmt::Display for Warp {
+impl<S:SimtxScheduler> fmt::Display for Warp<S> {
     fn fmt(&self, f:&mut fmt::Formatter<'_>) -> fmt::Result {
         let prelude = write!(f, "Warp {}c, \n", self.cores.len());
         self.paths.iter().fold(prelude, |res, p| {
@@ -553,9 +509,9 @@ struct LoopData {
 
 /// The SIMT-X machine. To handle `pthread` or `omp` system calls, we detect them
 /// using plt information, and emulate them.
-pub struct Machine {
+pub struct Machine<S:SimtxScheduler> {
     // Our cores
-    warps:Vec<Warp>,
+    warps:Vec<Warp<S>>,
 
     // For dynamic library calls emulation
     plt_addresses:HashMap<i32, String>,
@@ -582,8 +538,8 @@ pub struct Machine {
     stack_size: usize,
 }
 
-impl Machine {
-    pub fn new(tpw:usize, nb_warps:usize, plt_addresses:HashMap<i32, String>) -> Machine {
+impl<S:SimtxScheduler> Machine<S> {
+    pub fn new(tpw:usize, nb_warps:usize, plt_addresses:HashMap<i32, String>) -> Machine<S> {
 
         if tpw > MAX_TPW {
             panic!("This version of SIMTX is compiled with MAX_TPW={}", MAX_TPW)
@@ -730,7 +686,7 @@ impl Machine {
                 }
             }
             println!("threshold reached {} times", warp.thresholds);
-            println!("paths fusionned {} times", warp.fusions);
+            println!("paths merged {} times", warp.fusions);
         }
         println!("detected loops:");
         for (end, start) in &self.detected_loops {
@@ -773,7 +729,7 @@ impl Machine {
     }
 }
 
-impl MultiCoreIMachine for Machine {
+impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
     type IntegerType = i32;
 
     fn step(&mut self, mem:Arc<Mutex<dyn Memory + std::marker::Send>>) {
@@ -797,7 +753,7 @@ impl MultiCoreIMachine for Machine {
                 (4, i)
             };
 
-            println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
+            //println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
         
             // Update back-branch stats
             if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {
@@ -998,13 +954,16 @@ impl MultiCoreIMachine for Machine {
                     self.warps[wid].execute(mem.deref_mut())
                 }
             } else if i.get_opcode_enum() == OpCode::SYSTEM {
-                //let csr = CsrId::from(i.get_imm_i() as u16);
+                let csr = CsrId::from((i.get_imm_i() & 0xfff) as u16);
                 //let rs1 = i.get_rs1() as usize;
                 let rd = i.get_rd() as usize;
                 self.warps[wid].for_each_core_alive_i(|i, c| {
-                    let v = i + wid*tpw;
+                    let v = match csr {
+                        CsrId::MHARTID => { i + wid*tpw },
+                        _ => 0,
+                    };
+                    println!("csrr {:?} = {}", csr, v);
                     c.registers[rd] = v as i32;
-                    println!("HartId of core {} is {}, put v in r{}", i, v, rd);
                 });
                 self.warps[wid].paths[pathid].fetch_pc += advance;
             } else {

@@ -6,7 +6,7 @@ extern crate clap;
 use clap::Values;
 
 use riscv_sandbox::elf;
-use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX};
+use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX, simtx::scheduler::LexicoScheduler};
 use riscv_sandbox::memory::Memory;
 
 use std::collections::{HashMap, BTreeMap};
@@ -23,7 +23,7 @@ fn main() {
     let conf = clap_app!(myapp =>
         (version: "1.0")
         (author: "Arthur Blanleuil")
-        (about: "A simple example of clap usage")
+        (about: "A SIMTX emulator written in Rust")
         (@arg TPW: +required +takes_value {is_usize} "Sets the number of threads per warps")
         (@arg NBW: +required +takes_value {is_usize} "Sets the number of warps")
         (@arg monitored: -m --monitor [pc]... "Provide a list of pc to parse")
@@ -79,7 +79,7 @@ fn main() {
     }
 
     // create the machine and set it up
-    let mut machine = SIMTX::new(tpw, nb_warps, calls);
+    let mut machine : SIMTX<LexicoScheduler> = SIMTX::new(tpw, nb_warps, calls);
     println!("[SIM] Setting pc to 0x{:x}", pc as usize);
 
     {
@@ -138,9 +138,10 @@ fn main() {
         }
     }
 
-    for pc in monitored_pc {
-        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
-    }
+    //for pc in monitored_pc {
+    //    machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
+    //}
 
+    machine.print_stats();
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register_of(0, 10));
 }

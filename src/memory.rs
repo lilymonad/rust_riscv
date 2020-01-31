@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 
+pub trait Storable {
+    fn read_from(mem:&dyn Memory, addr:usize) -> Self;
+    fn store_to(&self, mem:&mut dyn Memory, addr:usize);
+}
+
 /// Represents the main memory.
 /// It can be implemented by any structure which can handle loads and stores.
 ///

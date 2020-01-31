@@ -6,7 +6,7 @@ extern crate clap;
 use clap::Values;
 
 use riscv_sandbox::elf;
-use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX};
+use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX, simtx::scheduler::LexicoScheduler};
 use riscv_sandbox::memory::Memory;
 
 use std::collections::{HashMap, BTreeMap};
@@ -86,7 +86,7 @@ fn main() {
     }
 
     // create the machine and set it up
-    let mut machine = SIMTX::new(tpw, nb_warps, calls);
+    let mut machine : SIMTX<LexicoScheduler> = SIMTX::new(tpw, nb_warps, calls);
     machine.place_stack(stackend, stacksize);
 
     println!("[SIM] Setting pc to 0x{:x}", pc as usize);
@@ -160,10 +160,10 @@ fn main() {
         }
     }*/
 
-    for pc in monitored_pc {
-        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
-    }
-
+//    for pc in monitored_pc {
+//        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
+//    }
+machine.print_stats();
     for range in conf.values_of("memdump").unwrap_or(Values::default()) {
         let mut iter = range.split("-").take(2);
         let beg = usize::from_str_radix(iter.next().unwrap(), 16).unwrap();
