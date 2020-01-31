@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
     env,
-    path::Path };
+    path::Path,
+};
     
 use memory::{Memory, Storable};
 
@@ -50,7 +51,7 @@ pub fn get_symbol_address(file:&elflib::File, symbol:&str) -> Option<i32> {
     let symbols = file.get_symbols(symtab).ok()?;
 
     for sym in symbols {
-        if sym.name.contains(symbol) {
+        if symbol == sym.name {
             return Some(sym.value as i32)
         }
     }

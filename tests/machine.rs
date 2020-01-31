@@ -3,7 +3,10 @@ extern crate riscv_sandbox;
 
 use riscv_sandbox::machine::{rv32imc::Machine as RV32I
     //, rv32pthread::Machine as RV32Threaded
-    , simtx::Machine as SIMTX
+    , simtx::{
+        Machine as SIMTX,
+        scheduler::LexicoScheduler,
+      }
     , *
     , self};
 use riscv_sandbox::isa::{Instruction, OpCode};
@@ -213,5 +216,5 @@ fn fibonacci() {
 #[test]
 #[should_panic]
 fn simtx_too_many_tpw() {
-    let _ = SIMTX::new(machine::simtx::MAX_TPW + 1, 1, HashMap::new());
+    let _ : SIMTX<LexicoScheduler> = SIMTX::new(machine::simtx::MAX_TPW + 1, 1, HashMap::new());
 }
