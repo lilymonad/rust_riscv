@@ -1,10 +1,9 @@
 use std::{
     collections::HashMap,
-    env,
-    path::Path,
+//    env,
+//    path::Path,
 };
-    
-use memory::{Memory, Storable};
+use memory::{Memory, /*Storable*/};
 
 /// Helper for `load_section(file, ".text", mem)`
 pub fn load_instructions(file:&elflib::File, mem:&mut dyn Memory) -> Option<(usize, usize)> {
@@ -51,7 +50,7 @@ pub fn get_symbol_address(file:&elflib::File, symbol:&str) -> Option<i32> {
     let symbols = file.get_symbols(symtab).ok()?;
 
     for sym in symbols {
-        if symbol == sym.name {
+        if sym.name == symbol {
             return Some(sym.value as i32)
         }
     }

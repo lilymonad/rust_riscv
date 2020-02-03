@@ -302,7 +302,7 @@ impl Machine {
                     0b001 => v1 << v2,
                     0b101 => if i.get_funct7() != 0 { v1 >> v2 }
                              else { ((v1 as u32) >> v2) as i32 },
-                    _ => 0, // Cannot be here, because funct3 is on 3 bits
+                    _ => unreachable!(),
                 };
             },
             OpCode::OPREG => {
@@ -330,7 +330,7 @@ impl Machine {
                         0b101 => ((v1 as u32) >> v2) as i32,
                         0b110 => v1 | v2,
                         0b111 => v1 & v2,
-                        _ => 0, // Cannot be here, because funct3 is on 3 bits
+                        _ => unreachable!(),
                     },
                     0b0000001 => match i.get_funct3() { // M Extension
                         0b000 => v1 * v2,
@@ -341,14 +341,14 @@ impl Machine {
                         0b101 => if v2 == 0 { allset } else { (uv1 / uv2) as i32 }, // DIVU
                         0b110 => if v2 == 0 { v1 } else { v1 % v2 }, // REM
                         0b111 => if v2 == 0 { v1 } else { (uv1 % uv2) as i32 }, // REMU
-                        _ => 0,
+                        _ => unreachable!(),
                     },
                     0b0100000 => match i.get_funct3() {
                         0b000 => v1.wrapping_sub(v2),
                         0b101 => v1 >> v2,
-                        _ => 0, // TODO handle bad funct3 values
+                        _ => unreachable!(),
                     },
-                    _ => 0, // TODO add other extensions (F has priority)
+                    _ => unimplemented!(), // TODO add other extensions (F has priority)
                 };
 
             },

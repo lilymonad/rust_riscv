@@ -14,6 +14,6 @@ opt-level=3
 debug=false
 
 [dependencies]
-elf = "^0.0.10"
-crossbeam = "*"
-clap = "*"
+elf = "^0.0.10" # .elf files parsing
+crossbeam = "*" # parallelism
+clap = "*"      # command line arguments

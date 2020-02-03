@@ -82,6 +82,8 @@ pub struct Warp<S:SimtxScheduler> {
     pub thresholds: usize,
     pub fusions: usize,
     pub cond_branch_data: HashMap<i32, CondBranchData>,
+
+    // PhantomData used for "interfacing"
     scheduler:PhantomData<S>,
 }
 
@@ -131,7 +133,7 @@ impl<S:SimtxScheduler> Warp<S> {
 
 
 
-    fn probas(&self) -> Vec<f32> {
+    fn _probas(&self) -> Vec<f32> {
         let ps = &self.paths;
 
         let raw : Vec<f32> = ps
@@ -142,7 +144,7 @@ impl<S:SimtxScheduler> Warp<S> {
                     .into_iter()
                     .enumerate()
                     .filter(|(j,_)| i != *j)
-                    .fold(0., |v, (j,pp)| {
+                    .fold(0., |v, (_,pp)| {
                         let decrease_factor = 1;
                         v + 1. / ((pp.fetch_pc as f32) - p.fetch_pc as f32)
                             .abs()
@@ -167,7 +169,7 @@ impl<S:SimtxScheduler> Warp<S> {
     pub fn schedule_path(&mut self) {
 
 
-        //**TODO:
+        //**TODO: scheduling priority timing window
         //* avoir une boite "priorite" qui calcule la prio de scheduling des chemins
         //* definir les bons criteres pour cette boite
         //*
@@ -178,15 +180,6 @@ impl<S:SimtxScheduler> Warp<S> {
         S::schedule(self)
     }
 
-    /// This function is a helper used to work on all alive threads of the
-    /// `current_path`.
-    pub fn for_each_core_alive<T:FnMut(&mut Core)->()>(&mut self, mut f:T) {
-        let ex = self.paths[self.current_path].execution_mask;
-        for i in ex.bits().ones() {
-            f(&mut self.cores[i as usize]);
-        }
-    }
-
     pub fn _cores(&self) -> impl Iterator<Item=&Core> {
         let ex = self.paths[self.current_path].execution_mask;
         self.cores.iter().enumerate().filter_map(move |(i, c)| {
@@ -194,19 +187,11 @@ impl<S:SimtxScheduler> Warp<S> {
         })
     }
 
-    pub fn cores_mut(&mut self) -> impl Iterator<Item=&mut Core> {
+    pub fn cores_mut(&mut self) -> impl Iterator<Item=(usize, &mut Core)> {
         let ex = self.paths[self.current_path].execution_mask;
         self.cores.iter_mut().enumerate().filter_map(move |(i, c)| {
-            if ex.at(i) { Some(c) } else { None }
+            ex.at(i).then((i,c))
         })
-    }
-
-    /// Same as `for_each_core_alive()` but with the ID of the core.
-    fn for_each_core_alive_i<T:FnMut(usize, &mut Core)->()>(&mut self, mut f:T) {
-        let ex = self.paths[self.current_path].execution_mask;
-        for i in ex.bits().ones() {
-            f(i as usize, &mut self.cores[i as usize])
-        }
     }
 
     /// Returns an iterator going through all alive cores IDs in order.
@@ -227,11 +212,9 @@ impl<S:SimtxScheduler> Warp<S> {
     /// This operation is NOT cycle accurate. Will be later when needed.
     pub fn execute(&mut self, mem:&mut dyn Memory) {
         if self.current_path == 0xFFFFFFFF { return }
-
         let pid = self.current_path;
-        let path = self.paths[pid];
-        let mask = path.execution_mask;
-        let pc = path.fetch_pc;
+        let mask : u32 = self.paths[pid].execution_mask;
+        let pc : i32 = self.paths[pid].fetch_pc;
         let inst = Instruction(mem.get_32(pc as usize));
 
         let (inst, advance) = if inst.is_compressed() {
@@ -245,7 +228,7 @@ impl<S:SimtxScheduler> Warp<S> {
 
         match inst.get_opcode_enum() {
             OpCode::LUI => {
-                for core in self.cores_mut() {
+                for (_, core) in self.cores_mut() {
                     core.registers[inst.get_rd() as usize] = inst.get_imm_u();
                 }
             },
@@ -255,9 +238,9 @@ impl<S:SimtxScheduler> Warp<S> {
             },
             OpCode::JAL => {
                 if inst.get_rd() != 0 {
-                    self.for_each_core_alive(|core| {
+                    for (_, core) in self.cores_mut() {
                         core.registers[inst.get_rd() as usize] = pc.wrapping_add(advance);
-                    });
+                    }
                 }
                 self.paths[pid].fetch_pc = pc.wrapping_add(inst.get_imm_j());
                 update_pc = false
@@ -266,8 +249,8 @@ impl<S:SimtxScheduler> Warp<S> {
 
                 let mut nph : HashMap<i32, BitVec> = HashMap::new();
 
-                // Compute new paths based on the new thread PCs
-                self.for_each_core_alive_i(|i, core| {
+                // Compute new self.paths[pid]s based on the new thread PCs
+                for (i, core) in self.cores_mut() {
                     let new_pc = inst.get_imm_i().
                         wrapping_add(core.registers[inst.get_rs1() as usize]);
                     if let Some(bv) = nph.get_mut(&new_pc) {
@@ -278,14 +261,14 @@ impl<S:SimtxScheduler> Warp<S> {
                     if inst.get_rd() != 0 {
                         core.registers[inst.get_rd() as usize] = pc.wrapping_add(advance);
                     }
-                });
+                }
 
                 // Check if it's a uniform jump
-                // and just update the pc of the current path if it is
+                // and just update the pc of the current self.paths[pid] if it is
                 if nph.len() == 1 {
                     self.paths[pid].fetch_pc = *nph.keys().next().unwrap();
                 } else {
-                    // If not, create as many paths as needed and inject them
+                    // If not, create as many self.paths[pid]s as needed and inject them
                     let old_pc = self.paths[self.current_path].fetch_pc;
                     self.paths.remove(self.current_path);
                     for (pc, mask) in nph {
@@ -303,7 +286,7 @@ impl<S:SimtxScheduler> Warp<S> {
                 let mut taken_mask = 0;
 
                 // compute taken/not_taken masks for each alive thread
-                self.for_each_core_alive_i(|i, core| {
+                for (i, core) in self.cores_mut() {
                     let r1 = inst.get_rs1() as usize;
                     let v1 = core.registers[r1];
                     let uv1 = v1 as u32;
@@ -325,11 +308,11 @@ impl<S:SimtxScheduler> Warp<S> {
                     if take {
                         taken_mask.set(i);
                     }
-                });
+                }
 
                 let not_taken_mask = (!taken_mask) & self.paths[self.current_path].execution_mask;
 
-                // update path, and add new paths if divergent
+                // update self.paths[pid], and add new paths if divergent
                 if !not_taken_mask.any() {    // uniform taken
                     self.paths[pid].fetch_pc = tpc;
                 } else if !taken_mask.any() { // uniform not taken
@@ -361,7 +344,7 @@ impl<S:SimtxScheduler> Warp<S> {
             },
             OpCode::LOAD => {
                 let width = inst.get_funct3();
-                self.for_each_core_alive(|core| {
+                for (_, core) in self.cores_mut() {
                     let rbase = inst.get_rs1() as usize;
                     let base = core.registers[rbase];
                     let imm = inst.get_imm_i();
@@ -376,11 +359,11 @@ impl<S:SimtxScheduler> Warp<S> {
                             _ => panic!("LOAD: bad word width"), // ERROR
                         };
                     core.registers[inst.get_rd() as usize] = value;
-                });
+                }
             },
             OpCode::STORE => {
                 let width = inst.get_funct3();
-                self.for_each_core_alive(|core| {
+                for (_, core) in self.cores_mut() {
                     let base = core.registers[inst.get_rs1() as usize];
                     let addr = (base.wrapping_add(inst.get_imm_s()) as usize) & 0xffffffff;
 
@@ -391,10 +374,10 @@ impl<S:SimtxScheduler> Warp<S> {
                         2 => mem.set_32(addr, src as u32),
                         _ => panic!("STORE: Bad word width"), // ERROR
                     };
-                });
+                }
             },
             OpCode::OPIMM => {
-                self.for_each_core_alive(|core| {
+                for (_, core) in self.cores_mut() {
                     let dst = inst.get_rd() as usize;
 
                     let v1 = core.registers[inst.get_rs1() as usize];
@@ -416,10 +399,10 @@ impl<S:SimtxScheduler> Warp<S> {
                         _ => 0, // Cannot be here, because funct3 is on 3 bits
                     };
                     //if dst == 2 { println!("{} -> r2 = 0x{:08x}", inst, core.registers[dst]) }
-                });
+                }
             },
             OpCode::OPREG => {
-                self.for_each_core_alive(|core| {
+                for (_, core) in self.cores_mut() {
                     let dst = inst.get_rd() as usize;
                     let v1 = core.registers[inst.get_rs1() as usize];
                     let v2 = core.registers[inst.get_rs2() as usize];
@@ -459,13 +442,13 @@ impl<S:SimtxScheduler> Warp<S> {
                         0b0100000 => match inst.get_funct3() {
                             0b000 => v1.wrapping_sub(v2), // SUB
                             0b101 => v1 >> v2, // SRA
-                            _ => 0, // TODO handle bad funct3 values
+                            _ => unreachable!(),
                         },
-                        _ => 0, // TODO add other extensions (F has priority)
+                        _ => unimplemented!(), // TODO add other extensions (F has priority)
                     };
-                });
+                }
             },
-            _ => {}
+            _ => unimplemented!(),
         }
 
         // If it was a jump, we update the mask history
@@ -736,13 +719,13 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
         let mut mem = mem.lock().unwrap();
         let tpw = self.warps[0].cores.len();
 
-        let old_gp = self.warps[0].cores[0].registers[3];
         for wid in 0..self.warps.len() {
             self.clean_idle();
             self.warps[wid].schedule_path();
 
             let pathid = self.warps[wid].current_path;
             if pathid == 0xFFFFFFFF || self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
+
             let pc = self.warps[wid].paths[pathid].fetch_pc;
 
             let i = Instruction(mem.get_32(pc as usize));
@@ -957,22 +940,19 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                 let csr = CsrId::from((i.get_imm_i() & 0xfff) as u16);
                 //let rs1 = i.get_rs1() as usize;
                 let rd = i.get_rd() as usize;
-                self.warps[wid].for_each_core_alive_i(|i, c| {
+                for (i, c) in self.warps[wid].cores_mut() {
                     let v = match csr {
                         CsrId::MHARTID => { i + wid*tpw },
                         _ => 0,
                     };
                     println!("csrr {:?} = {}", csr, v);
                     c.registers[rd] = v as i32;
-                });
+                }
                 self.warps[wid].paths[pathid].fetch_pc += advance;
             } else {
                 self.warps[wid].execute(mem.deref_mut())
             }
         }
-
-        let new_gp = self.warps[0].cores[0].registers[3];
-        if old_gp != new_gp { panic!("gp changed from {} to {}", old_gp, new_gp) }
     }
 
     fn get_i_register_of(&self, coreid:usize, id:usize) -> i32 {

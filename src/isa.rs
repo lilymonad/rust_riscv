@@ -449,7 +449,6 @@ impl Instruction {
     ///
     /// It is also very useful as many (almost all) helper functions of the
     /// `Instruction` structure only work on `uncompressed` format.
-    // TODO: debug it
     pub fn uncompressed(&self) -> Instruction {
         match self.get_opcode() & 0b11 {
             0b10 => {
