@@ -6,7 +6,6 @@ use isa::{Instruction, OpCode, CsrId};
 use memory::*;
 use types::{MachineInteger, BitSet, BoolIterator};
 use std::{
-    marker::PhantomData,
     sync::{Arc, Mutex},
     fmt,
     ops::DerefMut,
@@ -14,7 +13,7 @@ use std::{
 };
 
 type BitVec = u32;
-pub static MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
+pub const MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
 
 /// Defines the state of a single hardware thread.
 #[derive(Clone)]
@@ -84,7 +83,7 @@ pub struct Warp<S:SimtxScheduler> {
     pub cond_branch_data: HashMap<i32, CondBranchData>,
 
     // PhantomData used for "interfacing"
-    scheduler:PhantomData<S>,
+    pub scheduler:S,
 }
 
 impl<S:SimtxScheduler> Warp<S> {
@@ -100,7 +99,7 @@ impl<S:SimtxScheduler> Warp<S> {
             fusions: 0,
             cond_branch_data: HashMap::new(),
             cycles_since_last_schedule: 0,
-            scheduler:PhantomData,
+            scheduler:S::default(),
         }
     }
 
@@ -120,8 +119,6 @@ impl<S:SimtxScheduler> Warp<S> {
             .next()
             .expect("Current path is empty")
     }
-
-
 
     fn _probas(&self) -> Vec<f32> {
         let ps = &self.paths;
@@ -149,8 +146,6 @@ impl<S:SimtxScheduler> Warp<S> {
             .collect()
     }
 
-
-
     /// This function should be called right before any FETCH step of the `Warp`
     /// to ensure we always execute a valid path.
     ///
@@ -170,18 +165,14 @@ impl<S:SimtxScheduler> Warp<S> {
         S::schedule(self)
     }
 
-    pub fn _cores(&self) -> impl Iterator<Item=&Core> {
+    pub fn cores(&self) -> impl Iterator<Item=(usize, &Core)> {
         let ex = self.paths[self.current_path.unwrap()].execution_mask;
-        self.cores.iter().enumerate().filter_map(move |(i, c)| {
-            if ex.at(i) { Some(c) } else { None }
-        })
+        self.cores.iter().enumerate().filter(move |(i,_)| { ex.at(*i) })
     }
 
     pub fn cores_mut(&mut self) -> impl Iterator<Item=(usize, &mut Core)> {
         let ex = self.paths[self.current_path.unwrap()].execution_mask;
-        self.cores.iter_mut().enumerate().filter_map(move |(i, c)| {
-            ex.at(i).then((i,c))
-        })
+        self.cores.iter_mut().enumerate().filter(move |(i,_)| ex.at(*i))
     }
 
     /// Returns an iterator going through all alive cores IDs in order.
@@ -340,7 +331,6 @@ impl<S:SimtxScheduler> Warp<S> {
                     let rbase = inst.get_rs1() as usize;
                     let base = core.registers[rbase];
                     let imm = inst.get_imm_i();
-                    //println!("{:x}(r{}) + {:x} = {:x}", base, inst.get_rs1(), imm, base.wrapping_add(imm));
 
                     let addr = (base.wrapping_add(imm) as usize) & 0xffffffff;
 
@@ -390,7 +380,6 @@ impl<S:SimtxScheduler> Warp<S> {
                                  else { ((v1 as u32) >> v2) as i32 },   // SRAIU
                         _ => 0, // Cannot be here, because funct3 is on 3 bits
                     };
-                    //if dst == 2 { println!("{} -> r2 = 0x{:08x}", inst, core.registers[dst]) }
                 }
             },
             OpCode::OPREG => {
@@ -407,7 +396,6 @@ impl<S:SimtxScheduler> Warp<S> {
 
                     let allset = i32::all_set();
 
-                    //if pc == 0x10766 { println!("r14={}, r12={}", v1, v2) }
                     core.registers[dst] = match inst.get_funct7() {
                         0b0000000 => match inst.get_funct3() {
                             0b000 => v1.wrapping_add(v2),
@@ -463,10 +451,6 @@ impl<S:SimtxScheduler> Warp<S> {
         if let Some(curr) = self.current_path {
             if curr >= pid { self.current_path = None }
         }
-    }
-
-    fn path_mut(&mut self, pid:usize) -> &mut Path {
-        &mut self.paths[pid]
     }
 
     fn clean_idles(&mut self, offset:usize) -> Vec<usize> {
@@ -609,11 +593,7 @@ impl<S:SimtxScheduler> Machine<S> {
         self.idle_threads.pop().expect("No more threads")
     }
 
-    fn push_idle(&mut self, thread:usize) {
-        self.idle_threads.push(thread)
-    }
-
-    fn clean_idle(&mut self) {
+    fn clean_idles(&mut self) {
         let tpw = self.warps[0].cores.len();
         let iter = self.warps.iter_mut()
             .enumerate()
@@ -723,7 +703,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
         let tpw = self.warps[0].cores.len();
 
         for wid in 0..self.warps.len() {
-            self.clean_idle();
+            self.clean_idles();
             let pathid = self.warps[wid].schedule_path();
 
             if pathid.is_none() ||
@@ -740,7 +720,8 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                 (4, i)
             };
 
-            //println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
+            //PRINTF DEBUGGING
+            println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
         
             // Update back-branch stats
             if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {

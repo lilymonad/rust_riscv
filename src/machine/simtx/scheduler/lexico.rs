@@ -1,19 +1,24 @@
 use machine::simtx::{Warp, Path, scheduler::SimtxScheduler};
 use std::collections::HashMap;
 
+static SCHEDULE_THRESHOLD : usize = 16;
+
 #[derive(Clone)]
-pub struct Scheduler;
+pub struct Scheduler {
+    cycles_until_schedule:usize,
+}
+
+impl std::default::Default for Scheduler {
+    fn default() -> Self {
+        Scheduler { cycles_until_schedule:0 }
+    }
+}
 
 impl SimtxScheduler for Scheduler {
     fn schedule(simulator:&mut Warp<Self>) -> Option<usize> {
-
-        // threshold for "re-schedule"
-        let schedule_trigger = 16;
-
         if simulator.paths.is_empty() { 
-            simulator.current_path = None;//0xFFFFFFFF;
-            simulator.cycles_since_last_schedule = schedule_trigger;
-            None
+            simulator.current_path = None;
+            simulator.scheduler.cycles_until_schedule = SCHEDULE_THRESHOLD;
         } else {
 
             // old_pc is:
@@ -54,15 +59,15 @@ impl SimtxScheduler for Scheduler {
 
             // only schedule if we passed the "schedule threshold" or if the last
             // path we scheduled just died
-            if !(simulator.cycles_since_last_schedule >= schedule_trigger
+            if !(simulator.scheduler.cycles_until_schedule == 0
                 || old_pc.is_none())
             {
-                simulator.cycles_since_last_schedule += 1;
+                simulator.scheduler.cycles_until_schedule -= 1;
                 return simulator.current_path
             }
 
             // when re-scheduling, reset the cycle counter
-            simulator.cycles_since_last_schedule = 0;
+            simulator.scheduler.cycles_until_schedule = SCHEDULE_THRESHOLD;
 
             // gather threads which reached the idle threshold
             let idle_threshold = 4;
@@ -98,8 +103,7 @@ impl SimtxScheduler for Scheduler {
                 if i == simulator.current_path.unwrap() { simulator.paths[i].time_since_scheduled = 0 }
                 else { simulator.paths[i].time_since_scheduled += 1 }
             }
-
-            simulator.current_path
         }
+        simulator.current_path
     }
 }
