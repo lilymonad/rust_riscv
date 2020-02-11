@@ -105,30 +105,20 @@ impl<S:SimtxScheduler> Warp<S> {
     }
 
     pub fn _get_path_of_core_mut(&mut self, cid:usize) -> Option<&mut Path> {
-        for p in &mut self.paths {
-            if p.execution_mask.at(cid) { return Some(p) }
-        }
-
-        None
+        self.paths.iter_mut().filter(|p| p.execution_mask.at(cid)).next()
     }
 
     pub fn _get_path_of_core(&self, cid:usize) -> Option<&Path> {
-        for p in &self.paths {
-            if p.execution_mask.at(cid) { return Some(p) }
-        }
-
-        None
+        self.paths.iter().filter(|p| p.execution_mask.at(cid)).next()
     }
 
-    pub fn get_single_core_id(&mut self) -> usize {
-        let mask = &self.paths[self.current_path.unwrap()].execution_mask;
-        for i in 0..self.cores.len() {
-            if mask.at(i) {
-                return i
-            }
-        }
-
-        panic!("A path is empty")
+    pub fn get_single_core_id(&self) -> usize {
+        self.paths[self.current_path.unwrap()].execution_mask
+            .bits()
+            .ones()
+            .map(|i| i as usize)
+            .next()
+            .expect("Current path is empty")
     }
 
 
