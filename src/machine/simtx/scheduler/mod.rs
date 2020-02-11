@@ -7,5 +7,5 @@ pub use machine::simtx::scheduler::lexico::Scheduler as LexicoScheduler;
 //pub use proba::Scheduler as ProbaScheduler;
 
 pub trait SimtxScheduler : Sized + Clone {
-    fn schedule(simulator:&mut Warp<Self>);
+    fn schedule(simulator:&mut Warp<Self>) -> Option<usize>;
 }

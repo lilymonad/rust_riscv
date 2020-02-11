@@ -74,7 +74,7 @@ pub struct CondBranchData {
 pub struct Warp<S:SimtxScheduler> {
     pub cores: Vec<Core>,
     pub paths: Vec<Path>,
-    pub current_path: usize,
+    pub current_path: Option<usize>,
     pub cycles_since_last_schedule: usize,
 
     // Log variables
@@ -94,7 +94,7 @@ impl<S:SimtxScheduler> Warp<S> {
         Warp {
             cores,
             paths: Vec::new(),
-            current_path: 0,
+            current_path: None,
             branch_mask_hist: HashMap::new(),
             thresholds: 0,
             fusions: 0,
@@ -121,7 +121,7 @@ impl<S:SimtxScheduler> Warp<S> {
     }
 
     pub fn get_single_core_id(&mut self) -> usize {
-        let mask = &self.paths[self.current_path].execution_mask;
+        let mask = &self.paths[self.current_path.unwrap()].execution_mask;
         for i in 0..self.cores.len() {
             if mask.at(i) {
                 return i
@@ -166,7 +166,7 @@ impl<S:SimtxScheduler> Warp<S> {
     ///
     /// This function sets the `current_path` of the `Warp` correcly according
     /// to the scheduling rule, but also fusion paths with the same PC.
-    pub fn schedule_path(&mut self) {
+    pub fn schedule_path(&mut self) -> Option<usize> {
 
 
         //**TODO: scheduling priority timing window
@@ -181,14 +181,14 @@ impl<S:SimtxScheduler> Warp<S> {
     }
 
     pub fn _cores(&self) -> impl Iterator<Item=&Core> {
-        let ex = self.paths[self.current_path].execution_mask;
+        let ex = self.paths[self.current_path.unwrap()].execution_mask;
         self.cores.iter().enumerate().filter_map(move |(i, c)| {
             if ex.at(i) { Some(c) } else { None }
         })
     }
 
     pub fn cores_mut(&mut self) -> impl Iterator<Item=(usize, &mut Core)> {
-        let ex = self.paths[self.current_path].execution_mask;
+        let ex = self.paths[self.current_path.unwrap()].execution_mask;
         self.cores.iter_mut().enumerate().filter_map(move |(i, c)| {
             ex.at(i).then((i,c))
         })
@@ -196,7 +196,7 @@ impl<S:SimtxScheduler> Warp<S> {
 
     /// Returns an iterator going through all alive cores IDs in order.
     pub fn alive_cores_ids(&self) -> impl Iterator<Item=usize> {
-        self.paths[self.current_path].execution_mask.bits().ones().map(|id| id as usize)
+        self.paths[self.current_path.unwrap()].execution_mask.bits().ones().map(|id| id as usize)
     }
 
     fn update_branch_hist(&mut self, pc:i32, mask:BitVec) {
@@ -211,8 +211,8 @@ impl<S:SimtxScheduler> Warp<S> {
     /// 
     /// This operation is NOT cycle accurate. Will be later when needed.
     pub fn execute(&mut self, mem:&mut dyn Memory) {
-        if self.current_path == 0xFFFFFFFF { return }
-        let pid = self.current_path;
+        if self.current_path.is_none() { return }
+        let pid = self.current_path.unwrap();
         let mask : u32 = self.paths[pid].execution_mask;
         let pc : i32 = self.paths[pid].fetch_pc;
         let inst = Instruction(mem.get_32(pc as usize));
@@ -269,10 +269,10 @@ impl<S:SimtxScheduler> Warp<S> {
                     self.paths[pid].fetch_pc = *nph.keys().next().unwrap();
                 } else {
                     // If not, create as many self.paths[pid]s as needed and inject them
-                    let old_pc = self.paths[self.current_path].fetch_pc;
-                    self.paths.remove(self.current_path);
+                    let old_pc = self.paths[self.current_path.unwrap()].fetch_pc;
+                    self.paths.remove(self.current_path.unwrap());
                     for (pc, mask) in nph {
-                        if old_pc == pc { self.current_path = self.paths.len() }
+                        if old_pc == pc { self.current_path = Some(self.paths.len()) }
                         self.paths.push(Path::from_pc_mask(pc, mask));
                     }
                 }
@@ -310,7 +310,7 @@ impl<S:SimtxScheduler> Warp<S> {
                     }
                 }
 
-                let not_taken_mask = (!taken_mask) & self.paths[self.current_path].execution_mask;
+                let not_taken_mask = (!taken_mask) & self.paths[self.current_path.unwrap()].execution_mask;
 
                 // update self.paths[pid], and add new paths if divergent
                 if !not_taken_mask.any() {    // uniform taken
@@ -318,7 +318,7 @@ impl<S:SimtxScheduler> Warp<S> {
                 } else if !taken_mask.any() { // uniform not taken
                     self.paths[pid].fetch_pc = ntpc;
                 } else {                      // divergent
-                    self.paths.remove(self.current_path);
+                    self.paths.remove(self.current_path.unwrap());
                     self.paths.push(Path::from_pc_mask(tpc, taken_mask));
                     self.paths.push(Path::from_pc_mask(ntpc, not_taken_mask));
                 }
@@ -605,7 +605,7 @@ impl<S:SimtxScheduler> Machine<S> {
             let mut new_path = self.warps[wi].current_path;
             let new_paths = self.warps[wi].paths.clone().into_iter().enumerate().filter_map(|(i,p)| {
                 if p.fetch_pc == 0 {
-                    if i == new_path { new_path = 0xFFFFFFFF }
+                    if i == new_path.unwrap() { new_path = None }
                     for i in p.execution_mask.bits().ones() {
                         self.push_idle(wi * tpw + i as usize)
                     }
@@ -721,11 +721,12 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
 
         for wid in 0..self.warps.len() {
             self.clean_idle();
-            self.warps[wid].schedule_path();
+            let pathid = self.warps[wid].schedule_path();
 
-            let pathid = self.warps[wid].current_path;
-            if pathid == 0xFFFFFFFF || self.warps[wid].paths[pathid].fetch_pc == 0 { continue }
+            if pathid.is_none() ||
+                self.warps[wid].paths[pathid.unwrap()].fetch_pc == 0 { continue }
 
+            let pathid = pathid.unwrap();
             let pc = self.warps[wid].paths[pathid].fetch_pc;
 
             let i = Instruction(mem.get_32(pc as usize));
