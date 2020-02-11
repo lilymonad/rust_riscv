@@ -270,10 +270,10 @@ impl<S:SimtxScheduler> Warp<S> {
                 } else {
                     // If not, create as many self.paths[pid]s as needed and inject them
                     let old_pc = self.paths[self.current_path.unwrap()].fetch_pc;
-                    self.paths.remove(self.current_path.unwrap());
+                    self.remove_path(self.current_path.unwrap());
                     for (pc, mask) in nph {
                         if old_pc == pc { self.current_path = Some(self.paths.len()) }
-                        self.paths.push(Path::from_pc_mask(pc, mask));
+                        self.push_path(Path::from_pc_mask(pc, mask));
                     }
                 }
 
@@ -318,9 +318,9 @@ impl<S:SimtxScheduler> Warp<S> {
                 } else if !taken_mask.any() { // uniform not taken
                     self.paths[pid].fetch_pc = ntpc;
                 } else {                      // divergent
-                    self.paths.remove(self.current_path.unwrap());
-                    self.paths.push(Path::from_pc_mask(tpc, taken_mask));
-                    self.paths.push(Path::from_pc_mask(ntpc, not_taken_mask));
+                    self.remove_path(self.current_path.unwrap());
+                    self.push_path(Path::from_pc_mask(tpc, taken_mask));
+                    self.push_path(Path::from_pc_mask(ntpc, not_taken_mask));
                 }
 
                 let outcome = 
@@ -460,6 +460,21 @@ impl<S:SimtxScheduler> Warp<S> {
         } else {
             self.update_branch_hist(pc, mask)
         }
+    }
+
+    fn push_path(&mut self, path:Path) {
+        self.paths.push(path)
+    }
+
+    fn remove_path(&mut self, pid:usize) {
+        self.paths.remove(pid);
+        if let Some(curr) = self.current_path {
+            if curr >= pid { self.current_path = None }
+        }
+    }
+
+    fn path_mut(&mut self, pid:usize) -> &mut Path {
+        &mut self.paths[pid]
     }
 }
 
@@ -605,7 +620,7 @@ impl<S:SimtxScheduler> Machine<S> {
             let mut new_path = self.warps[wi].current_path;
             let new_paths = self.warps[wi].paths.clone().into_iter().enumerate().filter_map(|(i,p)| {
                 if p.fetch_pc == 0 {
-                    if i == new_path.unwrap() { new_path = None }
+                    new_path = new_path.filter(|&p| p != i);
                     for i in p.execution_mask.bits().ones() {
                         self.push_idle(wi * tpw + i as usize)
                     }
@@ -704,7 +719,7 @@ impl<S:SimtxScheduler> Machine<S> {
                     warp.paths[pid].fetch_pc += advance;
                     
                     if bv_barr.any() {
-                        warp.paths.push(Path::from_pc_mask(pc, bv_barr));
+                        warp.push_path(Path::from_pc_mask(pc, bv_barr));
                     }
                 }
             }
@@ -791,7 +806,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         let npc = self.warps[wid].cores[cid].registers[12];
                         let m = BitSet::singleton(t);
 
-                        self.warps[w].paths.push(Path::from_pc_mask(npc, m));
+                        self.warps[w].push_path(Path::from_pc_mask(npc, m));
 
                         // return 0 and advance current path
                         self.warps[wid].cores[cid].registers[10] = 0;
@@ -994,14 +1009,14 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                 let new_mask : BitVec = BitSet::singleton(cid);
                 let modified_mask = ex & !new_mask;
 
-                self.warps[wid].paths.push(Path::from_pc_mask(value, new_mask));
+                self.warps[wid].push_path(Path::from_pc_mask(value, new_mask));
                 self.warps[wid].paths[pid].execution_mask = modified_mask;
                 return
             }
         }
 
         self.idle_threads.remove_item(&coreid);
-        self.warps[wid].paths.push(Path::from_pc_mask(value, BitSet::singleton(cid)));
+        self.warps[wid].push_path(Path::from_pc_mask(value, BitSet::singleton(cid)));
     }
 
     fn finished(&self) -> bool {
