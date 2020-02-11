@@ -233,8 +233,10 @@ impl<S:SimtxScheduler> Warp<S> {
                 }
             },
             OpCode::AUIPC => { // direct jumps are always uniform
-                self.paths[pid].fetch_pc = pc.wrapping_add(inst.get_imm_u());
-                update_pc = false
+                let value = pc.wrapping_add(inst.get_imm_u());
+                for (_, core) in self.cores_mut() {
+                    core.registers[inst.get_rd() as usize] = value
+                }
             },
             OpCode::JAL => {
                 if inst.get_rd() != 0 {
@@ -476,6 +478,17 @@ impl<S:SimtxScheduler> Warp<S> {
     fn path_mut(&mut self, pid:usize) -> &mut Path {
         &mut self.paths[pid]
     }
+
+    fn clean_idles(&mut self, offset:usize) -> Vec<usize> {
+        self.current_path = None;
+        self.paths.drain_filter(|p| {
+            p.fetch_pc == 0
+        })
+        .map(|p| p.execution_mask.bits().ones())
+        .flatten()
+        .map(|cid| cid as usize + offset)
+        .collect()
+    }
 }
 
 impl<S:SimtxScheduler> fmt::Display for Warp<S> {
@@ -612,27 +625,12 @@ impl<S:SimtxScheduler> Machine<S> {
 
     fn clean_idle(&mut self) {
         let tpw = self.warps[0].cores.len();
+        let iter = self.warps.iter_mut()
+            .enumerate()
+            .map(|(i, w)| w.clean_idles(i * tpw))
+            .flatten();
 
-        // for each warp
-        for wi in 0..self.warps.len() {
-            // Filter out idle path (with fetch_pc == 0)
-            // and re-push idle threads into the idle pool
-            let mut new_path = self.warps[wi].current_path;
-            let new_paths = self.warps[wi].paths.clone().into_iter().enumerate().filter_map(|(i,p)| {
-                if p.fetch_pc == 0 {
-                    new_path = new_path.filter(|&p| p != i);
-                    for i in p.execution_mask.bits().ones() {
-                        self.push_idle(wi * tpw + i as usize)
-                    }
-                    None
-                } else {
-                    Some(p)
-                }
-            });
-
-            self.warps[wi].paths = new_paths.collect();
-            self.warps[wi].current_path = new_path;
-        }
+        self.idle_threads.extend(iter)
     }
 
     /// Prints the history of execution masks of the branch at address `pc`.
