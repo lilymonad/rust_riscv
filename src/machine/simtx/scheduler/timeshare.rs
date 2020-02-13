@@ -17,19 +17,21 @@ impl SimtxScheduler for Scheduler {
         // implementing LexicoScheduler
         //
 
-        // Try to get the next path to run
-        let mut path = None;
-        for _ in 0..MAX_TPW {
+        let mut clock = 0;
+        let mut path = loop {
             let pointer = simulator.scheduler.pointer;
-            if simulator.scheduler.slices[pointer] != 0 {
-                path = Some(pointer);
-                break
+            let remaining = &mut simulator.scheduler.slices[pointer];
+            if *remaining != 0 {
+                *remaining -= 1;
+                break Some(pointer)
             }
             simulator.scheduler.pointer = (pointer + 1) % MAX_TPW;
-        }
+            clock += 1;
+            if clock == MAX_TPW { break None }
+        };
 
         // If there are no more path to run
-        if path.is_none() {
+        if path.is_none() || simulator.schedule_invalidated {
 
             // Compute a new time share
             let mut paths : Vec<(usize, Path)> = simulator.paths.iter()
@@ -39,24 +41,42 @@ impl SimtxScheduler for Scheduler {
             paths.sort_by_key(|(_, p)| p.fetch_pc);
 
             let mut decreasing = 1f32;
+            let pool_size = 512f32;
+            let mut pool = pool_size as usize;
             let probas : Vec<(usize, f32)> = paths.iter()
                 .map(|(i,_)| { decreasing /= 2f32; (*i, decreasing) })
                 .collect();
 
-            for (i, p) in probas {
-                simulator.scheduler.slices[i] = (p * 256f32) as usize; 
+            for s in &mut simulator.scheduler.slices {
+                *s = 0;
+            }
+
+            let mut x = -1;
+            for (i, p) in &probas {
+                let n = (p * pool_size) as usize;
+                pool -= n;
+                x = *i as i32;
+                simulator.scheduler.slices[*i] = n; 
+            }
+
+            if x >= 0 {
+                simulator.scheduler.slices[x as usize] += pool;
             }
 
             // Re-search for a new path
-            path = None;
-            for _ in 0..MAX_TPW {
+            clock = 0;
+            path = loop {
                 let pointer = simulator.scheduler.pointer;
-                if simulator.scheduler.slices[pointer] != 0 {
-                    path = Some(pointer);
-                    break
+                let remaining = &mut simulator.scheduler.slices[pointer];
+                if *remaining != 0 {
+                    *remaining -= 1;
+                    break Some(pointer)
                 }
                 simulator.scheduler.pointer = (pointer + 1) % MAX_TPW;
-            }
+                clock += 1;
+                if clock == MAX_TPW { break None }
+            };
+            simulator.schedule_invalidated = false;
         }
 
         // Update the path (found or not) and return it

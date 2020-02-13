@@ -67,6 +67,10 @@ pub struct CondBranchData {
     taken_hist:Vec<BranchOutcome<BitVec>>,
 }
 
+impl CondBranchData {
+    fn new() -> Self { Self { times_passed : 0, taken_hist : Vec::new() } }
+}
+
 /// Defines a hardware warp (a group of threads) which all execute instructions
 /// in an SIMD fasion.
 #[derive(Clone)]
@@ -84,6 +88,7 @@ pub struct Warp<S:SimtxScheduler> {
 
     // PhantomData used for "interfacing"
     pub scheduler:S,
+    pub schedule_invalidated:bool,
 }
 
 impl<S:SimtxScheduler> Warp<S> {
@@ -91,6 +96,7 @@ impl<S:SimtxScheduler> Warp<S> {
         let mut cores = Vec::new();
         cores.resize(tpw, Core { registers : [ 0; 32 ], fregisters: [ 0.0; 32 ] });
         Warp {
+            schedule_invalidated:true,
             cores,
             paths: Vec::new(),
             current_path: None,
@@ -225,11 +231,10 @@ impl<S:SimtxScheduler> Warp<S> {
                         core.registers[inst.get_rd() as usize] = pc.wrapping_add(advance);
                     }
                 }
-                self.paths[pid].fetch_pc = pc.wrapping_add(inst.get_imm_j());
+                self.advance_pc(pid, inst.get_imm_j());
                 update_pc = false
             },
             OpCode::JALR => { // indirect jump can be divergent multiple times
-
                 let mut nph : HashMap<i32, BitVec> = HashMap::new();
 
                 // Compute new self.paths[pid]s based on the new thread PCs
@@ -249,11 +254,11 @@ impl<S:SimtxScheduler> Warp<S> {
                 // Check if it's a uniform jump
                 // and just update the pc of the current self.paths[pid] if it is
                 if nph.len() == 1 {
-                    self.paths[pid].fetch_pc = *nph.keys().next().unwrap();
+                    self.set_pc(pid, *nph.keys().next().unwrap());
                 } else {
                     // If not, create as many self.paths[pid]s as needed and inject them
-                    let old_pc = self.paths[self.current_path.unwrap()].fetch_pc;
-                    self.remove_path(self.current_path.unwrap());
+                    let old_pc = self.paths[pid].fetch_pc;
+                    self.remove_path(pid);
                     for (pc, mask) in nph {
                         if old_pc == pc { self.current_path = Some(self.paths.len()) }
                         self.push_path(Path::from_pc_mask(pc, mask));
@@ -297,9 +302,9 @@ impl<S:SimtxScheduler> Warp<S> {
 
                 // update self.paths[pid], and add new paths if divergent
                 if !not_taken_mask.any() {    // uniform taken
-                    self.paths[pid].fetch_pc = tpc;
+                    self.set_pc(pid, tpc);
                 } else if !taken_mask.any() { // uniform not taken
-                    self.paths[pid].fetch_pc = ntpc;
+                    self.set_pc(pid, ntpc);
                 } else {                      // divergent
                     self.remove_path(self.current_path.unwrap());
                     self.push_path(Path::from_pc_mask(tpc, taken_mask));
@@ -314,14 +319,10 @@ impl<S:SimtxScheduler> Warp<S> {
                         } else {
                             BranchOutcome::Divergent(taken_mask, not_taken_mask)
                         };
-                if let Some(dat) = self.cond_branch_data.get_mut(&pc) {
-                    dat.times_passed += 1;
-                    dat.taken_hist.push(outcome);
-                } else {
-                    let taken_hist = vec![outcome];
-                    let to_push = CondBranchData { times_passed:1, taken_hist };
-                    self.cond_branch_data.insert(pc, to_push);
-                }
+
+                let dat = self.cond_branch_data.entry(pc).or_insert(CondBranchData::new());
+                dat.times_passed += 1;
+                dat.taken_hist.push(outcome);
 
                 update_pc = false
             },
@@ -442,11 +443,44 @@ impl<S:SimtxScheduler> Warp<S> {
         }
     }
 
+    fn advance_pc(&mut self, pid:usize, advance:i32) {
+        let old_pc = self.paths[pid].fetch_pc;
+        self.set_pc(pid, old_pc.wrapping_add(advance))
+    }
+
+    fn set_pc(&mut self, pid:usize, pc:i32) {
+        let mask = self.paths[pid].execution_mask;
+
+        // search for a path already at given pc. if found, update its mask
+        // and remove the merged path, invalidating the scheduler state
+        for i in 0..self.paths.len() {
+            let p = &mut self.paths[i];
+            if p.fetch_pc == pc {
+                p.execution_mask |= mask;
+                self.remove_path(pid);
+                return
+            }
+        }
+
+        // if no merging occured, just modify the path's pc
+        self.paths[pid].fetch_pc = pc;
+    }
+
     fn push_path(&mut self, path:Path) {
+        // if we already have a path at path.fetch_pc, merge the given mask with
+        // the current mask
+        for p in &mut self.paths {
+            if p.fetch_pc == path.fetch_pc {
+                p.execution_mask |= path.execution_mask;
+                return
+            }
+        }
+        // if no path are here, just push a new path
         self.paths.push(path)
     }
 
     fn remove_path(&mut self, pid:usize) {
+        self.invalidate();
         self.paths.remove(pid);
         if let Some(curr) = self.current_path {
             if curr >= pid { self.current_path = None }
@@ -455,13 +489,21 @@ impl<S:SimtxScheduler> Warp<S> {
 
     fn clean_idles(&mut self, offset:usize) -> Vec<usize> {
         self.current_path = None;
-        self.paths.drain_filter(|p| {
-            p.fetch_pc == 0
+        let mut inv = false;
+        let ret = self.paths.drain_filter(|p| {
+            let b = p.fetch_pc == 0;
+            if b { inv = true }
+            b
         })
-        .map(|p| p.execution_mask.bits().ones())
-        .flatten()
+        .flat_map(|p| p.execution_mask.bits().ones())
         .map(|cid| cid as usize + offset)
-        .collect()
+        .collect();
+        self.schedule_invalidated |= inv;
+        ret
+    }
+
+    pub fn invalidate(&mut self) {
+        self.schedule_invalidated = true
     }
 }
 
@@ -489,6 +531,12 @@ struct Barrier {
 struct LoopData {
     times_passed:usize,
     num_threads_passed:usize,
+}
+
+impl LoopData {
+    fn new() -> Self {
+        Self { times_passed : 0, num_threads_passed : 0 }
+    }
 }
 
 
@@ -720,8 +768,8 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                 (4, i)
             };
 
-            //PRINTF DEBUGGING
-            println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
+            // DEBUG
+            //println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
         
             // Update back-branch stats
             if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {
@@ -729,15 +777,10 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                     let num_threads_passed = self.warps[wid]
                             .paths[pathid].execution_mask.bits().ones().count();
                     self.detected_loops.insert(pc, pc+i.jump_offset());
-                    if let Some(dat) = self.loop_data.get_mut(&pc) {
-                        dat.times_passed += 1;
-                        dat.num_threads_passed += self.warps[wid]
-                            .paths[pathid].execution_mask.bits().ones().count();
-                    } else {
-                        let dat = LoopData { times_passed: 1, num_threads_passed };
-                        self.loop_data.insert(pc, dat);
 
-                    }
+                    let dat = self.loop_data.entry(pc).or_insert(LoopData::new());
+                    dat.times_passed += 1;
+                    dat.num_threads_passed += num_threads_passed;
                 }
             }
 
@@ -779,12 +822,12 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
 
                         // return 0 and advance current path
                         self.warps[wid].cores[cid].registers[10] = 0;
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("pthread_join") {
                         let cid = self.warps[wid].get_single_core_id();
                         let to_wait = self.warps[wid].cores[cid].registers[10] as usize;
                         if self.idle_threads.contains(&to_wait) {
-                            self.warps[wid].paths[pathid].fetch_pc += advance;
+                            self.warps[wid].advance_pc(pathid, advance);
                         }
                     } else if func_name.contains("pthread_barrier_init") {
                         let cid = self.warps[wid].get_single_core_id();
@@ -796,7 +839,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                             current_cap:num,
                         });
 
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("pthread_barrier_wait") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let core = &self.warps[wid].cores[i];
@@ -834,20 +877,20 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                             }
                             println!("{}", s);
                         }
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("malloc") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let size = self.warps[wid].cores[i].registers[10];
                             let ptr = self.malloc(mem.deref_mut(), size as usize);
                             self.warps[wid].cores[i].registers[10] = ptr as i32;
                         }
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("free") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let ptr = self.warps[wid].cores[i].registers[10];
                             self.free(ptr as usize);
                         }
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("GOMP_parallel") {
                         let ids : Vec<usize> = self.warps[wid].alive_cores_ids().collect();
                         if ids.len() != 1 { panic!("GOMP_parallel() called by more than one thread") }
@@ -861,7 +904,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                             let core = &mut self.warps[wid].cores[i];
                             core.registers[10] = (num_warps * tpw) as i32;
                         }
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("omp_get_thread_num") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let core = &mut self.warps[wid].cores[i];
@@ -869,9 +912,9 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                             //println!("core {} omp_get_thread_num = {}", wid, tid);
                             core.registers[10] = tid as i32;
                         }
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("exit") {
-                        self.warps[wid].paths[pathid].fetch_pc = 0;
+                        self.warps[wid].set_pc(pathid, 0);
                     } else if func_name.contains("strtol") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let core = &mut self.warps[wid].cores[i];
@@ -893,7 +936,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
 
                             core.registers[10] = parsed;
                         }
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("fwrite") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let core = &mut self.warps[wid].cores[i];
@@ -914,9 +957,9 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         }
                     } else if func_name.contains("printf") {
                         println!("<printf>");
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else {
-                        self.warps[wid].paths[pathid].fetch_pc += advance;
+                        self.warps[wid].advance_pc(pathid, advance);
                     }
                 } else {
                     self.warps[wid].execute(mem.deref_mut())
@@ -933,7 +976,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                     println!("csrr {:?} = {}", csr, v);
                     c.registers[rd] = v as i32;
                 }
-                self.warps[wid].paths[pathid].fetch_pc += advance;
+                self.warps[wid].advance_pc(pathid, advance);
             } else {
                 self.warps[wid].execute(mem.deref_mut())
             }
