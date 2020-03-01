@@ -1,0 +1,9 @@
+#!/usr/bin/bash
+
+mode=$1
+shift
+scheduler=$1
+shift
+
+cargo rustc --$mode --bin simtx -- --cfg $scheduler
+./target/$mode/simtx $*

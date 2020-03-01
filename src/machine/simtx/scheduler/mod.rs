@@ -1,5 +1,7 @@
 use machine::simtx::Warp;
 
+mod loopaware;
+pub use machine::simtx::scheduler::loopaware::Scheduler as LoopAwareScheduler;
 mod timeshare;
 pub use machine::simtx::scheduler::timeshare::Scheduler as TimeShareScheduler;
 mod lexico;

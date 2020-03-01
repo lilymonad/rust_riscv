@@ -1,109 +1,73 @@
 use machine::simtx::{Warp, Path, scheduler::SimtxScheduler};
-use std::collections::HashMap;
 
-static SCHEDULE_THRESHOLD : usize = 16;
+const SCHEDULE_THRESHOLD : usize = 256;
+const RR_ROUNDS : usize = 256;
 
 #[derive(Clone)]
 pub struct Scheduler {
-    cycles_until_schedule:usize,
+    cycles_until_rr:usize,
+    rr_pointer:Option<usize>,
+    rr_time:usize,
 }
 
 impl std::default::Default for Scheduler {
     fn default() -> Self {
-        Scheduler { cycles_until_schedule:0 }
+        Scheduler { cycles_until_rr:SCHEDULE_THRESHOLD, rr_pointer:None, rr_time:RR_ROUNDS }
     }
 }
 
 impl SimtxScheduler for Scheduler {
     fn schedule(simulator:&mut Warp<Self>) -> Option<usize> {
+        simulator.current_path =
         if simulator.paths.is_empty() { 
             simulator.current_path = None;
-            simulator.scheduler.cycles_until_schedule = SCHEDULE_THRESHOLD;
+            simulator.scheduler.rr_pointer = None;
+            simulator.scheduler.cycles_until_rr = SCHEDULE_THRESHOLD;
+            None
         } else {
 
-            // old_pc is:
-            // - None if we destroyed the last path
-            // - Some(x) if we still have the last path, in order to retrieve it
-            //      after fusion
-            let old_pc = simulator
-                .current_path
-                .map(|pid| simulator.paths[pid].fetch_pc);
+            //println!("SCHEDULING {:x?}", simulator.paths);
+            // If it is RR time, start RR at path 0
+            let next = if simulator.scheduler.cycles_until_rr == 0 {
+                simulator.scheduler.cycles_until_rr = SCHEDULE_THRESHOLD;
 
-            // Fusion of path with the same PC
-            let mut fused = HashMap::new();
-            let mut fusion = false;
-            for p in &simulator.paths {
-                if let Some(lhs) = fused.get_mut(&p.fetch_pc) {
-                    *lhs |= p.execution_mask;
-                    fusion = true;
+                simulator.scheduler.rr_pointer = Some(0);
+                simulator.scheduler.rr_time = RR_ROUNDS;
+
+                //println!("START RR");
+                Some(0)
+
+            // If we are doing RR
+            } else if let Some(ptr) = simulator.scheduler.rr_pointer {
+                // Compute the next pointer (is the time-slice finished or not)
+                let nptr = if simulator.scheduler.rr_time != 0 {
+                    simulator.scheduler.rr_time -= 1;
+                    ptr
                 } else {
-                    fused.insert(p.fetch_pc, p.execution_mask);
-                }
-            }
+                    simulator.scheduler.rr_time = RR_ROUNDS;
+                    ptr + 1
+                };
 
-            // If fusion occurred, rebuild the path table
-            // + reset current_path to the good path
-            if fusion {
-                simulator.fusions += 1;
-                let mut npaths = Vec::new();
-                for (k, v) in fused {
-                    if let Some(pc) = old_pc {
-                        if k == pc {
-                            simulator.current_path = Some(npaths.len());
-                        }
-                    }
-                    npaths.push(Path::from_pc_mask(k, v));
-                }
-                simulator.paths = npaths;
-            }
+                // Compute whether we finished RR or not
+                let next = (nptr != simulator.paths.len()).then(|| nptr);
 
-            // only schedule if we passed the "schedule threshold" or if the last
-            // path we scheduled just died
-            if !(simulator.scheduler.cycles_until_schedule == 0
-                || old_pc.is_none())
-            {
-                simulator.scheduler.cycles_until_schedule -= 1;
-                return simulator.current_path
-            }
+                //println!("CONTINUE RR {:?}", next);
+                // Save and send the result
+                simulator.scheduler.rr_pointer = next;
+                next
+            } else { None }; // If we are still doing MinPC (no RR triggered)
 
-            // when re-scheduling, reset the cycle counter
-            simulator.scheduler.cycles_until_schedule = SCHEDULE_THRESHOLD;
+            // Send the RR-computed path id if any, or compute the MinPC either
+            next.or_else(|| {
+                simulator.scheduler.cycles_until_rr -= 1;
 
-            // gather threads which reached the idle threshold
-            let idle_threshold = 4;
-            let mut too_idle = Vec::new();
-            for i in 0..simulator.paths.len() {
-                if simulator.paths[i].time_since_scheduled > idle_threshold {
-                    too_idle.push(i);
-                }
-            }
-
-            // work_on represents the list of every path which are eligible for
-            // scheduling
-            //
-            // if we have idle threads, work_on represent only those idle threads
-            // if we don't, we just iterate over all threads
-            let work_on = if too_idle.is_empty() { (0..simulator.paths.len()).collect() } else { too_idle };
-            let work_on : Vec<usize> = work_on.into_iter().filter(|i| {
-                simulator.paths[*i].fetch_pc != 0
-            }).collect();
-            simulator.current_path = Some(work_on[0]);
-
-            // [min pc] over only eligible threads
-            for i in work_on {
-                // compute the path with the minimum pc
-                let ipc = simulator.paths[i].fetch_pc;
-                if ipc < simulator.paths[simulator.current_path.unwrap()].fetch_pc {
-                    simulator.current_path = Some(i)
-                }
-            }
-
-            // for each not-chosen path, increment their idle time
-            for i in 0..simulator.paths.len() {
-                if i == simulator.current_path.unwrap() { simulator.paths[i].time_since_scheduled = 0 }
-                else { simulator.paths[i].time_since_scheduled += 1 }
-            }
-        }
+                //println!("FUCK THE SYSTEM");
+                let mut copy : Vec<(usize, Path)>
+                    = simulator.paths.iter().cloned().enumerate().collect();
+                copy.sort_by_key(|(_,p)| p.fetch_pc);
+                copy.first().map(|(i,_)| *i)
+            })
+        };
         simulator.current_path
     }
 }

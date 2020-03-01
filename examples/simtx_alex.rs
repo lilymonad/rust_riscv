@@ -6,7 +6,8 @@ extern crate clap;
 use clap::Values;
 
 use riscv_sandbox::elf;
-use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX, simtx::scheduler::LexicoScheduler};
+use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX
+    , simtx::scheduler::{LexicoScheduler, TimeShareScheduler}};
 use riscv_sandbox::memory::Memory;
 
 use std::collections::{HashMap, BTreeMap};
@@ -152,18 +153,17 @@ fn main() {
         }
     }
 
-    /*for (key, chunk) in memory.iter() {
-        let mut k = *key;
-        for v in chunk.iter() {
-            println!("{} {}", k, v);
-            k = k.wrapping_add(4)
-        }
-    }*/
+//    for (key, chunk) in memory.iter() {
+//      let mut k = *key;
+//      for v in chunk.iter() {
+//          println!("{} {}", k, v);
+//          k = k.wrapping_add(4)
+//      }
 
-//    for pc in monitored_pc {
-//        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
-//    }
-machine.print_stats();
+    for pc in monitored_pc {
+        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
+    }
+//machine.print_stats();
     for range in conf.values_of("memdump").unwrap_or(Values::default()) {
         let mut iter = range.split("-").take(2);
         let beg = usize::from_str_radix(iter.next().unwrap(), 16).unwrap();

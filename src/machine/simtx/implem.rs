@@ -15,11 +15,33 @@ use std::{
 type BitVec = u32;
 pub const MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union MachineF32 {
+    bits:u32,
+    float:f32,
+}
+
+impl MachineF32 {
+    fn new() -> Self { Self::from_bits(0) }
+    fn from_bits(bits:u32) -> Self { Self { bits } }
+    fn from_value(float:f32) -> Self { Self { float } }
+}
+
 /// Defines the state of a single hardware thread.
 #[derive(Clone)]
 pub struct Core {
     pub registers: [ i32; 32 ],
-    pub fregisters: [ f32; 32 ],
+    pub fregisters: [ MachineF32; 32 ],
+}
+
+impl Core {
+    fn set_f32_register(&mut self, reg:usize, value:f32) {
+        self.fregisters[reg].float = value
+    }
+    fn get_f32_register(&self, reg:usize) -> f32 {
+        unsafe { self.fregisters[reg].float }
+    }
 }
 
 /// Defines a SIMT Path. As threads are grouped in `Warp`s executed in lockstep,
@@ -94,7 +116,7 @@ pub struct Warp<S:SimtxScheduler> {
 impl<S:SimtxScheduler> Warp<S> {
     pub fn new(tpw:usize) -> Warp<S> {
         let mut cores = Vec::new();
-        cores.resize(tpw, Core { registers : [ 0; 32 ], fregisters: [ 0.0; 32 ] });
+        cores.resize(tpw, Core { registers : [ 0; 32 ], fregisters: [ MachineF32::new(); 32 ] });
         Warp {
             schedule_invalidated:true,
             cores,
@@ -424,11 +446,150 @@ impl<S:SimtxScheduler> Warp<S> {
                             0b000 => v1.wrapping_sub(v2), // SUB
                             0b101 => v1 >> v2, // SRA
                             _ => unreachable!(),
-                        },
-                        _ => unimplemented!(), // TODO add other extensions (F has priority)
+                        }
+                        _ => unreachable!(),
                     };
                 }
             },
+            OpCode::FLW => {
+                let width = inst.get_funct3();
+                for (_, core) in self.cores_mut() {
+                    let rbase = inst.get_rs1() as usize;
+                    let base = core.registers[rbase];
+                    let imm = inst.get_imm_i();
+
+                    let addr = (base.wrapping_add(imm) as usize) & 0xffffffff;
+
+                    let value = match width {
+                            0 | 1 => unreachable!("LOAD: float values are 32bits wide at least"),
+                            2 => mem.get_32(addr) as u32,
+                            _ => unreachable!("LOAD: illegal word width {}", width),
+                        };
+                    core.fregisters[inst.get_rd() as usize].bits = value;
+                }
+            },
+            OpCode::FSW => {
+                let width = inst.get_funct3();
+                for (_, core) in self.cores_mut() {
+                    let base = core.registers[inst.get_rs1() as usize];
+                    let addr = (base.wrapping_add(inst.get_imm_s()) as usize) & 0xffffffff;
+
+                    let src = unsafe { core.fregisters[inst.get_rs2() as usize].bits };
+                    match width {
+                        0 | 1 => unreachable!("STORE: float values are 32bits wide at least"),
+                        2 => mem.set_32(addr, src),
+                        _ => unreachable!("STORE: illegal word width {}", width),
+                    };
+                }
+            },
+            OpCode::FMADD | OpCode::FMSUB | OpCode::FNMADD | OpCode::FNMSUB => { // FMADD.S
+                let dst  = inst.get_rd() as usize;
+                let _rm  = inst.get_funct3() as usize;
+                let src1 = inst.get_rs1() as usize;
+                let src2 = inst.get_rs2() as usize;
+                let src3 = inst.get_rs3() as usize;
+                let fmt  = inst.get_float_fmt();
+                assert!(fmt == 0, "SIMTX does not support more than 32bits single precition floating point operations");
+
+                for (_, core) in self.cores_mut() {
+                    let v1 = core.get_f32_register(src1);
+                    let v2 = core.get_f32_register(src2);
+                    let v3 = core.get_f32_register(src3);
+
+                    let value = match inst.get_opcode() & 0b1100 {
+                        0b0000 => v1*v2+v3,
+                        0b0100 => v1*v2-v3,
+                        0b1000 => -v1*v2+v3,
+                        0b1100 => -v1*v2-v3,
+                        _ => unreachable!(),
+                    };
+                    core.set_f32_register(dst, value);
+                }
+            },
+            OpCode::FOPREG => { // FLOAT OPREG
+                let funct = inst.get_funct7();
+                let dst   = inst.get_rd() as usize;
+                let rs1   = inst.get_rs1() as usize;
+                let rs2   = inst.get_rs2() as usize;
+                let rm    = inst.get_funct3();
+
+                for (_, core) in self.cores_mut() {
+                    let v1 = core.get_f32_register(rs1);
+                    let v2 = core.get_f32_register(rs2);
+
+                    match funct {
+                        0b0000000 => core.set_f32_register(dst, v1 + v2),
+                        0b0000100 => core.set_f32_register(dst, v1 - v2),
+                        0b0001000 => core.set_f32_register(dst, v1 * v2),
+                        0b0001100 => core.set_f32_register(dst, v1 / v2),
+                        0b0101100 => core.set_f32_register(dst, f32::sqrt(v1)),
+                        0b0010000 => { // "FSGNJ[N|X].S"
+                            let mut v1 = core.fregisters[rs1];
+                            let v2 = core.fregisters[rs2];
+                            unsafe {
+                                let sign_bit = match rm {
+                                    0b000 => v2.bits, // FSGNJ.S
+                                    0b001 => !v2.bits, // FSGNJN.S
+                                    0b010 => v1.bits ^ v2.bits, // FSGNJX.S
+                                    _ => unreachable!(),
+                                } & 0x80000000;
+                                v1.bits = (v1.bits & 0x7FFFFFFF) | sign_bit;
+                                core.set_f32_register(dst, v1.float)
+                            }
+                        },
+                        0b0010100 => core.set_f32_register(dst,
+                            match rm { 0 => f32::min(v1, v2), 1 => f32::max(v1, v2), _ => unreachable!(), }),
+                        0b1100000 => {
+                            match inst.get_rs2() { // FCVT.W[U].S
+                                0b00000 => core.registers[dst] =
+                                    if v1 > (std::i32::MAX as f32) {
+                                        std::i32::MAX
+                                    } else if v1 < (std::i32::MIN as f32) {
+                                        std::i32::MIN
+                                    } else {
+                                        v1 as i32
+                                    },
+                                0b00001 => core.registers[dst] =
+                                    if v1 > (std::u32::MAX as f32) {
+                                        std::u32::MAX as i32
+                                    } else if v1 < (std::u32::MIN as f32) {
+                                        std::u32::MIN as i32
+                                    } else {
+                                        v1 as i32
+                                    },
+                                _ => unreachable!(),
+                            }
+                        },
+                        0b1101000 => { // FCVT.S.W[U]
+                            match inst.get_rs2() {
+                                0b00000 => core.registers[dst] = v1 as i32,
+                                0b00001 => core.registers[dst] = (v1 as u32) as i32,
+                                _ => unreachable!(),
+                            }
+                        },
+                        0b1110000 => {
+                            match inst.get_rs2() {
+                                0b00000 => {
+                                    unsafe { core.registers[dst] = core.fregisters[rs1].bits as i32 }
+                                },
+                                0b00001 => unimplemented!("FCLASS.S"),
+                                _ => unreachable!(),
+                            }
+                        },
+                        0b1010000 => {
+                            core.registers[dst] = match inst.get_funct3() {
+                                0b000 => { (v1 <= v2) as i32 }, // LE
+                                0b001 => { (v1 < v2) as i32 }, // LT
+                                0b010 => { (v1 == v2) as i32 }, // EQ
+                                _ => unreachable!(),
+                            }
+                        },
+                        0b1111000 => core.fregisters[dst].bits = core.registers[rs1] as u32,
+                        _ => unreachable!(),
+                    };
+                }
+            },
+
             _ => unimplemented!(),
         }
 
@@ -539,6 +700,13 @@ impl LoopData {
     }
 }
 
+static mut LOOPS : Option<HashMap<i32, i32>> = None;
+pub fn loops() -> &'static mut HashMap<i32, i32> {
+    if unsafe { LOOPS.is_none() } {
+       unsafe { LOOPS = Some(HashMap::new()) }
+    }
+    unsafe { LOOPS.as_mut().unwrap() }
+}
 
 /// The SIMT-X machine. To handle `pthread` or `omp` system calls, we detect them
 /// using plt information, and emulate them.
@@ -706,6 +874,17 @@ impl<S:SimtxScheduler> Machine<S> {
         for (end, start) in &self.detected_loops {
             println!("{:08x} -> {:08x}", start, end)
         }
+    }
+
+    pub fn print_relevant_pcs(&self) {
+        println!("=== DETECTED LOOPS ===");
+        for (end, start) in &self.detected_loops {
+            println!("{:08x} -> {:08x}", start, end)
+        }
+    }
+
+    pub fn print_branch_stats(&self) {
+        println!("=== BRANCH STATS ===");
         for (pc, stats) in &self.loop_data {
             println!("{:08x}: {:?}", pc, stats);
         }
@@ -715,7 +894,8 @@ impl<S:SimtxScheduler> Machine<S> {
         for wid in 0..self.warps.len() {
             let warp = &mut self.warps[wid];
             let tpw = warp.cores.len();
-            for pid in 0..warp.paths.len() {
+            let mut pid = 0;
+            while pid < warp.paths.len() {
                 let pc = warp.paths[pid].fetch_pc;
                 let mask = warp.paths[pid].execution_mask;
                 let mut bv_cont = 0;
@@ -732,12 +912,13 @@ impl<S:SimtxScheduler> Machine<S> {
 
                 if bv_cont.any() {
                     warp.paths[pid].execution_mask = bv_cont;
-                    warp.paths[pid].fetch_pc += advance;
+                    warp.advance_pc(pid, advance);
                     
                     if bv_barr.any() {
                         warp.push_path(Path::from_pc_mask(pc, bv_barr));
                     }
                 }
+                pid += 1;
             }
         }
     }
@@ -955,6 +1136,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                                 _ => panic!("Unknown fd"),
                             };
                         }
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("printf") {
                         println!("<printf>");
                         self.warps[wid].advance_pc(pathid, advance);

@@ -185,6 +185,24 @@ impl Instruction {
         self.0 = (self.0 & 0xFE0FFFFF) | ((rs2 as u32) << 20)
     }
 
+    pub fn get_rs3(&self) -> u8 {
+        (self.get_funct7() >> 2) as u8
+    }
+
+    pub fn set_rs3(&mut self, value:u8) {
+        let old = self.get_funct7();
+        self.set_funct7((old & 0b0000011) | (value << 2))
+    }
+
+    pub fn get_float_fmt(&self) -> u8 {
+        (self.get_funct7() & 0b11) as u8
+    }
+
+    pub fn set_float_fmt(&mut self, value:u8) {
+        let old = self.get_funct7();
+        self.set_funct7((old & 0b1111100) | value)
+    }
+
     pub fn get_funct3(&self) -> u8 {
         ((self.0 & 0x7000) >> 12) as u8
     }
@@ -434,7 +452,7 @@ impl Instruction {
                 0b1110000 => "amomaxu.w",
                 _ => "illegal",
             } },
-            OpCode::INVALID => "illegal",
+            _ => "unimp",
         }
     }
 
@@ -608,6 +626,9 @@ impl Instruction {
             Type::J => {
                 format!("{} {}, ret r{}", self.get_mnemonic(), self.get_imm_j(), rs[self.get_rd() as usize])
             },
+            Type::R4 => {
+                format!("R4 not implemented")
+            }
         }
     }
 }
@@ -645,6 +666,9 @@ impl fmt::Display for Instruction {
             Type::J => {
                 write!(f, "{} {}, ret r{}", self.get_mnemonic(), self.get_imm_j(), self.get_rd())
             },
+            Type::R4 => {
+                write!(f, "R4 not implemented")
+            },
         }
     }
 }
@@ -658,6 +682,7 @@ pub enum Type {
     B,
     U,
     J,
+    R4,
 }
 
 /// Enum naming the different opcodes values
@@ -674,8 +699,15 @@ pub enum OpCode {
     OPREG  ,
     FENCE  ,
     SYSTEM ,
-    INVALID,
     AMO    ,
+    FLW    ,
+    FSW    ,
+    FMADD  ,
+    FMSUB  ,
+    FNMSUB ,
+    FNMADD ,
+    FOPREG ,
+    INVALID,
 }
 
 impl Into<Type> for OpCode {
@@ -692,6 +724,11 @@ impl Into<Type> for OpCode {
             OpCode::OPREG   => Type::R,
             OpCode::FENCE   => Type::U,
             OpCode::SYSTEM  => Type::I,
+            OpCode::FLW     => Type::I,
+            OpCode::FSW     => Type::S,
+            OpCode::FOPREG  => Type::R,
+            OpCode::FMADD | OpCode::FMSUB |
+                OpCode::FNMADD | OpCode::FNMSUB => Type::R4,
             _ => Type::U,
         }
     }
@@ -712,6 +749,13 @@ impl From<u8> for OpCode {
             0b0001111 => OpCode::FENCE,
             0b1110011 => OpCode::SYSTEM,
             0b0101111 => OpCode::AMO,
+            0b0000111 => OpCode::FLW,
+            0b0100111 => OpCode::FSW,
+            0b1000011 => OpCode::FMADD,
+            0b1000111 => OpCode::FMSUB,
+            0b1001011 => OpCode::FNMSUB,
+            0b1001111 => OpCode::FNMADD,
+            0b1010011 => OpCode::FOPREG,
             _ => OpCode::INVALID,
         }
     }
@@ -732,6 +776,13 @@ impl Into<u8> for OpCode {
             OpCode::FENCE   => 0b0001111,
             OpCode::SYSTEM  => 0b1110011,
             OpCode::AMO     => 0b0101111,
+            OpCode::FLW     => 0b0000111,
+            OpCode::FSW     => 0b0100111,
+            OpCode::FMADD   => 0b1000011,
+            OpCode::FMSUB   => 0b1000111,
+            OpCode::FNMSUB  => 0b1001011,
+            OpCode::FNMADD  => 0b1001111,
+            OpCode::FOPREG  => 0b1010011,
             OpCode::INVALID => 0,
         }
     }

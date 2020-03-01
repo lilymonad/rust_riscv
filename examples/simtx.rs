@@ -6,7 +6,7 @@ extern crate clap;
 use clap::Values;
 
 use riscv_sandbox::elf;
-use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX, simtx::scheduler::LexicoScheduler};
+use riscv_sandbox::machine::{MultiCoreIMachine, simtx::Machine as SIMTX, simtx::scheduler::{TimeShareScheduler, LexicoScheduler, LoopAwareScheduler}};
 use riscv_sandbox::memory::Memory;
 
 use std::collections::{HashMap, BTreeMap};
@@ -79,7 +79,12 @@ fn main() {
     }
 
     // create the machine and set it up
+    #[cfg(lexico)]
     let mut machine : SIMTX<LexicoScheduler> = SIMTX::new(tpw, nb_warps, calls);
+    #[cfg(timeshare)]
+    let mut machine : SIMTX<TimeShareScheduler> = SIMTX::new(tpw, nb_warps, calls);
+    #[cfg(loopaware)]
+    let mut machine : SIMTX<LoopAwareScheduler> = SIMTX::new(tpw, nb_warps, calls);
     println!("[SIM] Setting pc to 0x{:x}", pc as usize);
 
     {
@@ -138,10 +143,10 @@ fn main() {
         }
     }
 
-    //for pc in monitored_pc {
-    //    machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
-    //}
+    for pc in monitored_pc {
+        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
+    }
 
-    machine.print_stats();
+    //machine.print_stats();
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register_of(0, 10));
 }

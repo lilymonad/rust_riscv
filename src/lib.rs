@@ -1,4 +1,4 @@
-#![feature(vec_remove_item, bool_to_option,drain_filter)]
+#![feature(vec_remove_item, bool_to_option,drain_filter,new_uninit)]
 //! This crate is used for educational purposes only. Clone the
 //! [github repository](https://github.com/ablanleuil/rust_riscv) and create
 //! anything you want on top of this base. This crate was created only with the
