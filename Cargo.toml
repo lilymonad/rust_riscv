@@ -20,4 +20,4 @@ clap = "*"      # command line arguments
 
 [[bin]]
 name = "simtx"
-path = "examples/simtx_lexico.rs"
+path = "examples/simtx.rs"

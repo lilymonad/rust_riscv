@@ -206,6 +206,10 @@ fn load_program_with_offset(file:&elflib::File, mem:&mut dyn Memory, off:usize)
     let mut beg : usize = 0;
     let mut end : usize = 0;
     for section in &file.sections {
+        println!("loading section {} from {:x} to {:x}"
+            , section.shdr.name
+            , section.shdr.addr
+            , section.shdr.addr + section.shdr.size);
         let addr = section.shdr.addr as usize;
         if addr == 0 { continue }
 

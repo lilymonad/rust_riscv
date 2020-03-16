@@ -478,7 +478,7 @@ impl Instruction {
                         let code = self.get_c_nzimm_0_5();
                         let rsrd = self.get_c_nzr();
                         let rs2  = self.get_cs_rs2();
-                        if code & 0b100000 == 0 {
+                        if code & 0x1000 == 0 {
                             if rs2 == 0 { // 00
                                 Instruction::jalr(0, rsrd, 0) // ret
                             } else { // 01
@@ -525,7 +525,7 @@ impl Instruction {
                     },
                     0b100 => {
                         let code = (self.get_c_nzr() >> 3) & 0b11;
-                        let r = self.get_c_nzr() & 0b111 + 8;
+                        let r = (self.get_c_nzr() & 0b111) + 8;
                         let nzimm = self.get_c_nzimm_0_5();
                         let rs2 = self.get_cl_rd() + 8;
                         let alucode = (nzimm >> 2) & 0b11;

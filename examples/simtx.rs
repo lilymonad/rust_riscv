@@ -79,7 +79,7 @@ fn main() {
     }
 
     // create the machine and set it up
-    #[cfg(lexico)]
+    #[cfg(all(not(loopaware), not(timeshare)))]
     let mut machine : SIMTX<LexicoScheduler> = SIMTX::new(tpw, nb_warps, calls);
     #[cfg(timeshare)]
     let mut machine : SIMTX<TimeShareScheduler> = SIMTX::new(tpw, nb_warps, calls);
@@ -147,6 +147,7 @@ fn main() {
         machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
     }
 
-    //machine.print_stats();
+    machine.print_relevant_pcs();
+    machine.print_branch_stats();
     println!("[SIM] program ended in {} cycles with value {}", i, machine.get_i_register_of(0, 10));
 }

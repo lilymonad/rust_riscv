@@ -10,6 +10,9 @@ use std::{
     fmt,
     ops::DerefMut,
     collections::{HashMap, BTreeMap},
+    fs::{File, OpenOptions},
+    io::{Write, Read, BufReader, BufRead},
+    os::unix::fs::FileExt,
 };
 
 type BitVec = u32;
@@ -17,15 +20,43 @@ pub const MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+struct TwoF32 {
+    hi:f32,
+    lo:f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SplitU64 {
+    hi:u32,
+    lo:u32,
+}
+
+impl SplitU64 {
+    fn from_u64(bits:u64) -> SplitU64 {
+        let hi = (bits >> 32) as u32;
+        let lo = bits as u32;
+        SplitU64 { hi, lo }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub union MachineF32 {
-    bits:u32,
-    float:f32,
+    double:f64,
+    float:TwoF32,
+    bits:SplitU64,
 }
 
 impl MachineF32 {
-    fn new() -> Self { Self::from_bits(0) }
-    fn from_bits(bits:u32) -> Self { Self { bits } }
-    fn from_value(float:f32) -> Self { Self { float } }
+    fn new() -> Self { Self::from_u64(0) }
+    fn from_u64(bits:u64) -> Self { Self { bits: { SplitU64::from_u64(bits) } } }
+    fn from_f32(float:f32) -> Self {
+        let mut ret = Self { float: TwoF32 { hi:0f32, lo:float } };
+        ret.bits.hi = 0xFFFFFFFF;
+        ret
+    }
+    fn from_f64(double:f64) -> Self { Self { double } }
 }
 
 /// Defines the state of a single hardware thread.
@@ -37,10 +68,22 @@ pub struct Core {
 
 impl Core {
     fn set_f32_register(&mut self, reg:usize, value:f32) {
-        self.fregisters[reg].float = value
+        self.fregisters[reg] = MachineF32::from_f32(value);
     }
-    fn get_f32_register(&self, reg:usize) -> f32 {
-        unsafe { self.fregisters[reg].float }
+    fn get_f32_register(&mut self, reg:usize) -> f32 {
+        unsafe { self.fregisters[reg].float.lo }
+    }
+    fn set_f64_register(&mut self, reg:usize, value:f64) {
+        self.fregisters[reg].double = value
+    }
+    fn get_f64_register(&self, reg:usize) -> f64 {
+        unsafe { self.fregisters[reg].double }
+    }
+    fn set_ri(&mut self, reg:usize, value:i32) {
+        if reg == 5 {
+            println!("WRITE {:x} TO T0", value);
+        }
+        self.registers[reg] = value
     }
 }
 
@@ -108,7 +151,7 @@ pub struct Warp<S:SimtxScheduler> {
     pub fusions: usize,
     pub cond_branch_data: HashMap<i32, CondBranchData>,
 
-    // PhantomData used for "interfacing"
+    // Scheduler black box 
     pub scheduler:S,
     pub schedule_invalidated:bool,
 }
@@ -238,19 +281,19 @@ impl<S:SimtxScheduler> Warp<S> {
         match inst.get_opcode_enum() {
             OpCode::LUI => {
                 for (_, core) in self.cores_mut() {
-                    core.registers[inst.get_rd() as usize] = inst.get_imm_u();
+                    core.set_ri(inst.get_rd() as usize, inst.get_imm_u());
                 }
             },
             OpCode::AUIPC => { // direct jumps are always uniform
                 let value = pc.wrapping_add(inst.get_imm_u());
                 for (_, core) in self.cores_mut() {
-                    core.registers[inst.get_rd() as usize] = value
+                    core.set_ri(inst.get_rd() as usize, value)
                 }
             },
             OpCode::JAL => {
                 if inst.get_rd() != 0 {
                     for (_, core) in self.cores_mut() {
-                        core.registers[inst.get_rd() as usize] = pc.wrapping_add(advance);
+                        core.set_ri(inst.get_rd() as usize, pc.wrapping_add(advance));
                     }
                 }
                 self.advance_pc(pid, inst.get_imm_j());
@@ -269,7 +312,7 @@ impl<S:SimtxScheduler> Warp<S> {
                         nph.insert(new_pc, BitVec::singleton(i));
                     }
                     if inst.get_rd() != 0 {
-                        core.registers[inst.get_rd() as usize] = pc.wrapping_add(advance);
+                        core.set_ri(inst.get_rd() as usize, pc.wrapping_add(advance));
                     }
                 }
 
@@ -363,7 +406,11 @@ impl<S:SimtxScheduler> Warp<S> {
                             2 => mem.get_32(addr) as i32,
                             _ => panic!("LOAD: bad word width"), // ERROR
                         };
-                    core.registers[inst.get_rd() as usize] = value;
+
+                    //if pc == 0x10ab8 {
+                        println!("{} : loaded {} at {:x}", inst, value, addr);
+                    //}
+                    core.set_ri(inst.get_rd() as usize, value);
                 }
             },
             OpCode::STORE => {
@@ -379,6 +426,9 @@ impl<S:SimtxScheduler> Warp<S> {
                         2 => mem.set_32(addr, src as u32),
                         _ => panic!("STORE: Bad word width"), // ERROR
                     };
+                    if (pc & 0xfffff0) == 0x011110 {
+                        println!("STORE = {:x} AT {:x}", src, addr);
+                    }
                 }
             },
             OpCode::OPIMM => {
@@ -391,7 +441,7 @@ impl<S:SimtxScheduler> Warp<S> {
                                 }
                                 else { inst.get_imm_i() };
 
-                    core.registers[dst] = match inst.get_funct3() {
+                    core.set_ri(dst, match inst.get_funct3() {
                         0b000 => v1.wrapping_add(v2),              // ADDI
                         0b010 => (v1 < v2) as i32,                 // SLTI
                         0b011 => ((v1 as u32) < v2 as u32) as i32, // SLTIU
@@ -402,7 +452,7 @@ impl<S:SimtxScheduler> Warp<S> {
                         0b101 => if inst.get_funct7() != 0 { v1 >> v2 } // SRAI
                                  else { ((v1 as u32) >> v2) as i32 },   // SRAIU
                         _ => 0, // Cannot be here, because funct3 is on 3 bits
-                    };
+                    });
                 }
             },
             OpCode::OPREG => {
@@ -419,9 +469,9 @@ impl<S:SimtxScheduler> Warp<S> {
 
                     let allset = i32::all_set();
 
-                    core.registers[dst] = match inst.get_funct7() {
+                    core.set_ri(dst, match inst.get_funct7() {
                         0b0000000 => match inst.get_funct3() {
-                            0b000 => v1.wrapping_add(v2),
+                            0b000 => { let v=v1.wrapping_add(v2); println!("{:x}+{:x}={:x}", v1, v2, v); v },
                             0b001 => v1 << v2, // SLL
                             0b010 => (v1 < v2) as i32, // SLT
                             0b011 => ((v1 as u32) < v2 as u32) as i32, // SLTU
@@ -445,10 +495,10 @@ impl<S:SimtxScheduler> Warp<S> {
                         0b0100000 => match inst.get_funct3() {
                             0b000 => v1.wrapping_sub(v2), // SUB
                             0b101 => v1 >> v2, // SRA
-                            _ => unreachable!(),
+                            _ => unreachable!("OPREG SUB OR SHIFT"),
                         }
-                        _ => unreachable!(),
-                    };
+                        _ => unreachable!("OPREG FUNCT7"),
+                    });
                 }
             },
             OpCode::FLW => {
@@ -460,12 +510,24 @@ impl<S:SimtxScheduler> Warp<S> {
 
                     let addr = (base.wrapping_add(imm) as usize) & 0xffffffff;
 
+                    println!("{:x} : {:x}(x{}) + {:x} = {:x}",
+                        pc,
+                        base,
+                        rbase,
+                        imm,
+                        addr);
                     let value = match width {
                             0 | 1 => unreachable!("LOAD: float values are 32bits wide at least"),
-                            2 => mem.get_32(addr) as u32,
-                            _ => unreachable!("LOAD: illegal word width {}", width),
+                            2 => MachineF32::from_u64(mem.get_32(addr) as u64),
+                            3 => {
+                                let mut ret = MachineF32::new();
+                                ret.bits.hi = mem.get_32(addr) as u32;
+                                ret.bits.lo = mem.get_32(addr+4) as u32;
+                                ret
+                            },
+                            _ => unreachable!("LOAD @ 0x{:x}: illegal word width {}", pc, width),
                         };
-                    core.fregisters[inst.get_rd() as usize].bits = value;
+                    core.fregisters[inst.get_rd() as usize] = value;
                 }
             },
             OpCode::FSW => {
@@ -477,7 +539,8 @@ impl<S:SimtxScheduler> Warp<S> {
                     let src = unsafe { core.fregisters[inst.get_rs2() as usize].bits };
                     match width {
                         0 | 1 => unreachable!("STORE: float values are 32bits wide at least"),
-                        2 => mem.set_32(addr, src),
+                        2 => mem.set_32(addr, src.lo),
+                        3 => { mem.set_32(addr, src.hi); mem.set_32(addr+4, src.lo) },
                         _ => unreachable!("STORE: illegal word width {}", width),
                     };
                 }
@@ -489,103 +552,145 @@ impl<S:SimtxScheduler> Warp<S> {
                 let src2 = inst.get_rs2() as usize;
                 let src3 = inst.get_rs3() as usize;
                 let fmt  = inst.get_float_fmt();
-                assert!(fmt == 0, "SIMTX does not support more than 32bits single precition floating point operations");
 
                 for (_, core) in self.cores_mut() {
-                    let v1 = core.get_f32_register(src1);
-                    let v2 = core.get_f32_register(src2);
-                    let v3 = core.get_f32_register(src3);
 
-                    let value = match inst.get_opcode() & 0b1100 {
-                        0b0000 => v1*v2+v3,
-                        0b0100 => v1*v2-v3,
-                        0b1000 => -v1*v2+v3,
-                        0b1100 => -v1*v2-v3,
-                        _ => unreachable!(),
-                    };
-                    core.set_f32_register(dst, value);
+                    if fmt == 0b00 {
+                        let v1 = core.get_f32_register(src1);
+                        let v2 = core.get_f32_register(src2);
+                        let v3 = core.get_f32_register(src3);
+
+                        let value = match inst.get_opcode() & 0b1100 {
+                            0b0000 => v1*v2+v3,
+                            0b0100 => v1*v2-v3,
+                            0b1000 => -v1*v2+v3,
+                            0b1100 => -v1*v2-v3,
+                            _ => unreachable!("F[N]M[ADD|SUB]"),
+                        };
+                        core.set_f32_register(dst, value);
+                    } else if fmt == 0b01 {
+                        let v1 = core.get_f64_register(src1);
+                        let v2 = core.get_f64_register(src2);
+                        let v3 = core.get_f64_register(src3);
+
+                        let value = match inst.get_opcode() & 0b1100 {
+                            0b0000 => v1*v2+v3,
+                            0b0100 => v1*v2-v3,
+                            0b1000 => -v1*v2+v3,
+                            0b1100 => -v1*v2-v3,
+                            _ => unreachable!("F[N]M[ADD|SUB]"),
+                        };
+                        core.set_f64_register(dst, value);
+                    }
                 }
             },
             OpCode::FOPREG => { // FLOAT OPREG
                 let funct = inst.get_funct7();
+                let d_ext = (funct & 0b1) == 0b1;
                 let dst   = inst.get_rd() as usize;
                 let rs1   = inst.get_rs1() as usize;
                 let rs2   = inst.get_rs2() as usize;
                 let rm    = inst.get_funct3();
 
                 for (_, core) in self.cores_mut() {
-                    let v1 = core.get_f32_register(rs1);
-                    let v2 = core.get_f32_register(rs2);
+                    let v32_1 = core.get_f32_register(rs1);
+                    let v32_2 = core.get_f32_register(rs2);
+                    let v64_1 = core.get_f64_register(rs1);
+                    let v64_2 = core.get_f64_register(rs2);
 
-                    match funct {
-                        0b0000000 => core.set_f32_register(dst, v1 + v2),
-                        0b0000100 => core.set_f32_register(dst, v1 - v2),
-                        0b0001000 => core.set_f32_register(dst, v1 * v2),
-                        0b0001100 => core.set_f32_register(dst, v1 / v2),
-                        0b0101100 => core.set_f32_register(dst, f32::sqrt(v1)),
+                    match funct & 0b1111110 {
+                        0b0000000 => core.set_f32_register(dst, v32_1 + v32_2),
+                        0b0000001 => core.set_f64_register(dst, v64_1 + v64_2),
+                        0b0000100 => core.set_f32_register(dst, v32_1 - v32_2),
+                        0b0000101 => core.set_f64_register(dst, v64_1 - v64_2),
+                        0b0001000 => core.set_f32_register(dst, v32_1 * v32_2),
+                        0b0001001 => core.set_f64_register(dst, v64_1 * v64_2),
+                        0b0001100 => core.set_f32_register(dst, v32_1 / v32_2),
+                        0b0001101 => core.set_f64_register(dst, v64_1 / v64_2),
+                        0b0101100 => core.set_f32_register(dst, f32::sqrt(v32_1)),
+                        0b0101101 => core.set_f64_register(dst, f64::sqrt(v64_1)),
                         0b0010000 => { // "FSGNJ[N|X].S"
                             let mut v1 = core.fregisters[rs1];
                             let v2 = core.fregisters[rs2];
                             unsafe {
                                 let sign_bit = match rm {
-                                    0b000 => v2.bits, // FSGNJ.S
-                                    0b001 => !v2.bits, // FSGNJN.S
-                                    0b010 => v1.bits ^ v2.bits, // FSGNJX.S
-                                    _ => unreachable!(),
+                                    0b000 => v2.bits.lo, // FSGNJ.S
+                                    0b001 => !v2.bits.lo, // FSGNJN.S
+                                    0b010 => v1.bits.lo ^ v2.bits.lo, // FSGNJX.S
+                                    _ => unreachable!("FOPREG RM BITWISE"),
                                 } & 0x80000000;
-                                v1.bits = (v1.bits & 0x7FFFFFFF) | sign_bit;
-                                core.set_f32_register(dst, v1.float)
+                                v1.bits.lo = (v1.bits.lo & 0x7FFFFFFF) | sign_bit;
+                                core.set_f32_register(dst, v1.float.lo)
                             }
                         },
                         0b0010100 => core.set_f32_register(dst,
-                            match rm { 0 => f32::min(v1, v2), 1 => f32::max(v1, v2), _ => unreachable!(), }),
+                            match rm {
+                                0 => f32::min(v32_1, v32_2),
+                                1 => f32::max(v32_1, v32_2),
+                                _ => unreachable!("FOPREG RM MAXMIN"),
+                            }),
                         0b1100000 => {
                             match inst.get_rs2() { // FCVT.W[U].S
-                                0b00000 => core.registers[dst] =
-                                    if v1 > (std::i32::MAX as f32) {
+                                0b00000 => core.set_ri(dst,
+                                    if v32_1 > (std::i32::MAX as f32) {
                                         std::i32::MAX
-                                    } else if v1 < (std::i32::MIN as f32) {
+                                    } else if v32_1 < (std::i32::MIN as f32) {
                                         std::i32::MIN
                                     } else {
-                                        v1 as i32
-                                    },
-                                0b00001 => core.registers[dst] =
-                                    if v1 > (std::u32::MAX as f32) {
+                                        v32_1 as i32
+                                    }),
+                                0b00001 => core.set_ri(dst,
+                                    if v32_1 > (std::u32::MAX as f32) {
                                         std::u32::MAX as i32
-                                    } else if v1 < (std::u32::MIN as f32) {
+                                    } else if v32_1 < (std::u32::MIN as f32) {
                                         std::u32::MIN as i32
                                     } else {
-                                        v1 as i32
-                                    },
-                                _ => unreachable!(),
+                                        v32_1 as i32
+                                    }),
+                                _ => unreachable!("FOPREG CONV"),
                             }
                         },
                         0b1101000 => { // FCVT.S.W[U]
                             match inst.get_rs2() {
-                                0b00000 => core.registers[dst] = v1 as i32,
-                                0b00001 => core.registers[dst] = (v1 as u32) as i32,
-                                _ => unreachable!(),
+                                0b00000 => core.set_ri(dst, v32_1 as i32),
+                                0b00001 => core.set_ri(dst, (v32_1 as u32) as i32),
+                                _ => unreachable!("FCVT"),
                             }
                         },
                         0b1110000 => {
                             match inst.get_rs2() {
                                 0b00000 => {
-                                    unsafe { core.registers[dst] = core.fregisters[rs1].bits as i32 }
+                                    //println!("STORING IN REG {}", dst);
+                                    unsafe { core.set_ri(dst, core.fregisters[rs1].bits.lo as i32) }
                                 },
                                 0b00001 => unimplemented!("FCLASS.S"),
-                                _ => unreachable!(),
+                                _ => unreachable!("FCLASS"),
                             }
                         },
                         0b1010000 => {
-                            core.registers[dst] = match inst.get_funct3() {
-                                0b000 => { (v1 <= v2) as i32 }, // LE
-                                0b001 => { (v1 < v2) as i32 }, // LT
-                                0b010 => { (v1 == v2) as i32 }, // EQ
-                                _ => unreachable!(),
+                            core.set_ri(dst, match inst.get_funct3() {
+                                0b000 => { (v32_1 <= v32_2) as i32 }, // LE
+                                0b001 => { (v32_1 < v32_2) as i32 }, // LT
+                                0b010 => { (v32_1 == v32_2) as i32 }, // EQ
+                                _ => unreachable!("FLOAT COMP"),
+                            })
+                        },
+                        0b1111000 => core.fregisters[dst].bits.lo = core.registers[rs1] as u32,
+                        0b0100000 => { // FCVT.D.S
+                            let rd = inst.get_rd() as usize;
+                            let rs = inst.get_rs1() as usize;
+
+                            if d_ext {
+                                let rd = inst.get_rd() as usize;
+                                let rs = inst.get_rs1() as usize;
+                                let v = core.get_f64_register(rs) as f32;
+                                core.set_f32_register(rd, v)
+                            } else {
+                                let v = core.get_f32_register(rs) as f64;
+                                core.set_f64_register(rd, v)
                             }
                         },
-                        0b1111000 => core.fregisters[dst].bits = core.registers[rs1] as u32,
-                        _ => unreachable!(),
+                        _ => unreachable!("FOPREG FUNCT7"),
                     };
                 }
             },
@@ -737,6 +842,10 @@ pub struct Machine<S:SimtxScheduler> {
     // 32bits unsigned words for thread stack allocation
     stack_start: usize,
     stack_size: usize,
+
+    // For files and IO purposes
+    file_handles: BTreeMap<i32, (File, u64)>,
+    next_fid: i32,
 }
 
 impl<S:SimtxScheduler> Machine<S> {
@@ -772,6 +881,9 @@ impl<S:SimtxScheduler> Machine<S> {
             // it is 128 * 2Kio bytes stacks starting at 0x10000000
             stack_start: 0x20000000,
             stack_size: 0x00200000,
+
+            file_handles: BTreeMap::new(),
+            next_fid: 3,
         }
     }
 
@@ -838,38 +950,38 @@ impl<S:SimtxScheduler> Machine<S> {
     /// encountered. It also prints information about thhe scheduler and the
     /// Loop-Detector.
     pub fn print_stats(&self) {
-        for wid in 0..self.warps.len() {
-            println!("=== STATS FOR WARP {} ===", wid);
-            let warp = &self.warps[wid];
-            for (pc, hist) in &warp.branch_mask_hist {
-                println!("\t0x{:x}", pc);
-                for bv in hist {
-                    println!("\t[{:032b}]", bv);
-                }
-            }
-            for (pc, hist) in &warp.cond_branch_data {
-                println!("\t0x{:x}", pc);
-                for outcome in &hist.taken_hist {
-                    match outcome {
-                        BranchOutcome::Uniform(taken, mask) => {
-                            let s : String = mask.bits().map(|b| {
-                                if b { if *taken { 'A' } else { 'B' } } else { ' ' }
-                            }).collect();
-                            println!("{}", s);
-                        },
-                        BranchOutcome::Divergent(tm, ntm) => {
-                            let s : String = tm.bits().zip(ntm.bits())
-                                .map(|(t,nt)| {
-                                    if t { 'A' } else if nt { 'B' } else { ' ' }
-                                }).collect();
-                            println!("{}", s);
-                        },
-                    }
-                }
-            }
-            println!("threshold reached {} times", warp.thresholds);
-            println!("paths merged {} times", warp.fusions);
-        }
+//        for wid in 0..self.warps.len() {
+//            println!("=== STATS FOR WARP {} ===", wid);
+//            let warp = &self.warps[wid];
+//            for (pc, hist) in &warp.branch_mask_hist {
+//                println!("\t0x{:x}", pc);
+//                for bv in hist {
+//                    println!("\t[{:032b}]", bv);
+//                }
+//            }
+//            for (pc, hist) in &warp.cond_branch_data {
+//                println!("\t0x{:x}", pc);
+//                for outcome in &hist.taken_hist {
+//                    match outcome {
+//                        BranchOutcome::Uniform(taken, mask) => {
+//                            let s : String = mask.bits().map(|b| {
+//                                if b { if *taken { 'A' } else { 'B' } } else { ' ' }
+//                            }).collect();
+//                            println!("{}", s);
+//                        },
+//                        BranchOutcome::Divergent(tm, ntm) => {
+//                            let s : String = tm.bits().zip(ntm.bits())
+//                                .map(|(t,nt)| {
+//                                    if t { 'A' } else if nt { 'B' } else { ' ' }
+//                                }).collect();
+//                            println!("{}", s);
+//                        },
+//                    }
+//                }
+//            }
+//            println!("threshold reached {} times", warp.thresholds);
+//            println!("paths merged {} times", warp.fusions);
+//        }
         println!("detected loops:");
         for (end, start) in &self.detected_loops {
             println!("{:08x} -> {:08x}", start, end)
@@ -950,7 +1062,8 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
             };
 
             // DEBUG
-            //println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
+            #[cfg(debug_assertions)]
+            println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
         
             // Update back-branch stats
             if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {
@@ -993,6 +1106,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         regs[8] = stackstart as i32;
                         regs[3] = self.warps[wid].cores[cid].registers[3];
                         regs[4] = tid as i32;
+                        regs[10] = self.warps[wid].cores[cid].registers[13];
                         self.warps[w].cores[t].registers = regs;
 
                         // setup a new path with only allocated thread inside
@@ -1002,7 +1116,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         self.warps[w].push_path(Path::from_pc_mask(npc, m));
 
                         // return 0 and advance current path
-                        self.warps[wid].cores[cid].registers[10] = 0;
+                        self.warps[wid].cores[cid].set_ri(10, 0);
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("pthread_join") {
                         let cid = self.warps[wid].get_single_core_id();
@@ -1061,9 +1175,11 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("malloc") {
                         for i in self.warps[wid].alive_cores_ids() {
+                            print!("MALLOC CALLED!");
                             let size = self.warps[wid].cores[i].registers[10];
                             let ptr = self.malloc(mem.deref_mut(), size as usize);
-                            self.warps[wid].cores[i].registers[10] = ptr as i32;
+                            self.warps[wid].cores[i].set_ri(10, ptr as i32);
+                            println!(" ADRESSE EST {:x}", ptr);
                         }
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("free") {
@@ -1083,7 +1199,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         for i in self.warps[wid].alive_cores_ids() {
                             let num_warps = self.warps.len();
                             let core = &mut self.warps[wid].cores[i];
-                            core.registers[10] = (num_warps * tpw) as i32;
+                            core.set_ri(10, (num_warps * tpw) as i32);
                         }
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("omp_get_thread_num") {
@@ -1091,11 +1207,35 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                             let core = &mut self.warps[wid].cores[i];
                             let tid = wid*tpw + i;
                             //println!("core {} omp_get_thread_num = {}", wid, tid);
-                            core.registers[10] = tid as i32;
+                            core.set_ri(10, tid as i32);
                         }
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("exit") {
                         self.warps[wid].set_pc(pathid, 0);
+                    } else if func_name.contains("strtof") {
+                        for i in self.warps[wid].alive_cores_ids() {
+                            let core = &mut self.warps[wid].cores[i];
+                            let mut str_addr = core.registers[10];
+                            let mut to_parse = String::new();
+                            let mut byte = mem.get_8(str_addr as usize);
+
+                            //println!("byte at 0x{:x}", str_addr);
+
+                            while byte != 0 && byte != ('\n' as u8) {
+                                to_parse.push(byte as char);
+                                str_addr += 1;
+                                byte = mem.get_8(str_addr as usize);
+                            }
+        
+                            //println!("strtof({})", to_parse);
+                            let parsed = to_parse.parse()
+                                .expect(format!("couldnt parse {} to float", to_parse).as_str());
+                            //println!("strtol(\"{}\") = {}", to_parse, parsed);
+
+                            let x : MachineF32 = MachineF32::from_f32(parsed);
+                            unsafe { core.set_ri(10, x.bits.lo as i32); }
+                        }
+                        self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("strtol") {
                         for i in self.warps[wid].alive_cores_ids() {
                             let core = &mut self.warps[wid].cores[i];
@@ -1115,8 +1255,78 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                                 .expect(format!("couldnt parse {} to int", to_parse).as_str());
                             //println!("strtol(\"{}\") = {}", to_parse, parsed);
 
-                            core.registers[10] = parsed;
+                            core.set_ri(10, parsed);
                         }
+                        self.warps[wid].advance_pc(pathid, advance);
+                    } else if func_name.contains("fopen") {
+                        let cid = self.warps[wid].get_single_core_id();
+                        let core = &mut self.warps[wid].cores[wid];
+                        let mut addr = core.registers[10] as usize;
+                        let mut c = mem.get_8(addr);
+                        let mut fname = String::new();
+                        while c != 0 {
+                            fname.push(c as char);
+                            addr += 1;
+                            c = mem.get_8(addr);
+                        }
+                        let mut oo = OpenOptions::new();
+                        oo
+                            .write(true)
+                            .read(true)
+                            .create(true);
+
+                        core.set_ri(10, match oo.open(&fname) {
+                            Err(_) => 0,
+                            Ok(f) => {
+                                self.file_handles.insert(self.next_fid
+                                    , (f, 0));
+                                let ret = self.next_fid;
+                                self.next_fid += 1;
+                                ret
+                            },
+                        });
+
+                        self.warps[wid].advance_pc(pathid, advance);
+                    } else if func_name.contains("fgets") {
+                        let cid = self.warps[wid].get_single_core_id();
+                        let core = &mut self.warps[wid].cores[wid];
+                        let mut addr = core.registers[10] as usize;
+                        let size = core.registers[11] as u64;
+                        let fp = core.registers[12];
+
+                        match fp {
+                            0 | 2 => panic!("reading from stdout or stderr"),
+                            1 => {
+                                let mut buf = String::new();
+                                std::io::stdin().read_line(&mut buf).unwrap();
+                                for byte in buf.bytes() {
+                                    mem.set_8(addr, byte);
+                                    addr += 1;
+                                }
+                                mem.set_8(addr, 0);
+                            },
+                            n => {
+                                self.file_handles.get_mut(&n).map(|(file, cur)| {
+                                    let mut vec = vec![0;128];
+                                    if let Ok(size) = file.read_at(&mut vec, *cur) {
+                                        let line =
+                                        vec.iter().take_while(|c| {
+                                            **c != ('\n' as u8)
+                                        });
+
+                                        let mut i = 0;
+                                        for b in line {
+                                            mem.set_8(addr + i, *b);
+                                            i += 1;
+                                        }
+                                        mem.set_8(addr + i, 0);
+
+                                        *cur += (i+1) as u64;
+                                    }
+                                });
+                            },
+                        }
+
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("fwrite") {
                         for i in self.warps[wid].alive_cores_ids() {
@@ -1132,8 +1342,14 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                             }
                             match file_desc {
                                 0 => print!("{}", to_write),
+                                1 => panic!("writing to stdin"),
                                 2 => eprint!("{}", to_write),
-                                _ => panic!("Unknown fd"),
+                                n => self.file_handles.get_mut(&n).map(|(f,cur)| {
+                                    match f.write_at(to_write.as_bytes(), *cur) {
+                                        Err(_) => {},
+                                        Ok(size) => { *cur += size as u64 },
+                                    }
+                                }).unwrap(),
                             };
                         }
                         self.warps[wid].advance_pc(pathid, advance);
@@ -1156,7 +1372,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         _ => 0,
                     };
                     println!("csrr {:?} = {}", csr, v);
-                    c.registers[rd] = v as i32;
+                    c.set_ri(rd, v as i32);
                 }
                 self.warps[wid].advance_pc(pathid, advance);
             } else {
@@ -1176,7 +1392,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
         let tpw = self.warps[0].cores.len();
         let wid = coreid / tpw;
         let cid = coreid % tpw;
-        self.warps[wid].cores[cid].registers[id] = value
+        self.warps[wid].cores[cid].set_ri(id, value)
     }
 
     fn get_pc_of(&self, coreid:usize) -> i32 {

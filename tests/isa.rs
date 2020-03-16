@@ -277,4 +277,8 @@ fn compressed() {
     assert_eq!(
         Instruction(0x9636).uncompressed()
         , Instruction::add(12, 12, 13)); // add a2,a2,a3
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x8c32);
+    assert_eq!(
+        Instruction(0x8c32).uncompressed()
+        , Instruction::add(24, 12, 0)); // add s8,a2,zero
 }
