@@ -1,9 +1,46 @@
 #!/usr/bin/bash
 
-mode=$1
-shift
-scheduler=$1
-shift
 
-cargo rustc --$mode --bin simtx -- --cfg $scheduler
-./target/$mode/simtx $*
+function usage {
+  echo "$0 [-t TARGET] [-s SCHEDULER] TPW NBW EXEC [ARGS]"
+  echo ""
+  echo "TARGET:"
+  echo "  release"
+  echo "  debug"
+  echo "SCHEDULER:"
+  echo "  lexico"
+  echo "  timeshare"
+  echo "  loopaware"
+  exit
+}
+
+target="release"
+scheduler="lexico"
+
+while getopts ":t:s:" option; do
+  case "$option" in
+    t)
+      target=$OPTARG
+      ;;
+    s)
+      scheduler=$OPTARG
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+shift $((OPTIND-1))
+
+echo "cargo rustc --$target --bin simtx -- --cfg $scheduler"
+if [ $target == 'debug' ]; then 
+  cargo rustc --bin simtx -- --cfg $scheduler
+else
+  cargo rustc --$target --bin simtx -- --cfg $scheduler
+fi
+
+if [ $? -ne 0 ]; then
+  echo "FAILED BUILDING, ABORT"
+  exit
+fi
+./target/$target/simtx $*
