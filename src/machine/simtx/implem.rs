@@ -80,8 +80,9 @@ impl Core {
         unsafe { self.fregisters[reg].double }
     }
     fn set_ri(&mut self, reg:usize, value:i32) {
-        if reg == 5 {
-            println!("WRITE {:x} TO T0", value);
+        #[cfg(debug_assertions)]
+        /*if reg >= 18 && reg <= 27*/ {
+            println!("WRITE {:x} TO x{}", value, reg);
         }
         self.registers[reg] = value
     }
@@ -407,9 +408,10 @@ impl<S:SimtxScheduler> Warp<S> {
                             _ => panic!("LOAD: bad word width"), // ERROR
                         };
 
-                    //if pc == 0x10ab8 {
+                    #[cfg(debug_assertions)]
+                    /*if pc == 0x10ab8*/ {
                         println!("{} : loaded {} at {:x}", inst, value, addr);
-                    //}
+                    }
                     core.set_ri(inst.get_rd() as usize, value);
                 }
             },
@@ -426,8 +428,11 @@ impl<S:SimtxScheduler> Warp<S> {
                         2 => mem.set_32(addr, src as u32),
                         _ => panic!("STORE: Bad word width"), // ERROR
                     };
+                    #[cfg(debug_assertions)]
+                    {
                     if (pc & 0xfffff0) == 0x011110 {
                         println!("STORE = {:x} AT {:x}", src, addr);
+                    }
                     }
                 }
             },
@@ -458,8 +463,10 @@ impl<S:SimtxScheduler> Warp<S> {
             OpCode::OPREG => {
                 for (_, core) in self.cores_mut() {
                     let dst = inst.get_rd() as usize;
-                    let v1 = core.registers[inst.get_rs1() as usize];
-                    let v2 = core.registers[inst.get_rs2() as usize];
+                    let rs1 = inst.get_rs1() as usize;
+                    let rs2 = inst.get_rs2() as usize;
+                    let v1 = core.registers[rs1];
+                    let v2 = core.registers[rs2];
                     let uv1 = v1 as u32;
                     let uv2 = v2 as u32;
                     let v1_64 = v1 as i64;
@@ -471,7 +478,11 @@ impl<S:SimtxScheduler> Warp<S> {
 
                     core.set_ri(dst, match inst.get_funct7() {
                         0b0000000 => match inst.get_funct3() {
-                            0b000 => { let v=v1.wrapping_add(v2); println!("{:x}+{:x}={:x}", v1, v2, v); v },
+                            0b000 => { 
+                                let v=v1.wrapping_add(v2);
+                                #[cfg(debug_assertions)]
+                                println!("{:x}(x{})+{:x}(x{})={:x}(x{})", v1, rs1, v2, rs2, v, dst);
+                                v },
                             0b001 => v1 << v2, // SLL
                             0b010 => (v1 < v2) as i32, // SLT
                             0b011 => ((v1 as u32) < v2 as u32) as i32, // SLTU
@@ -510,6 +521,7 @@ impl<S:SimtxScheduler> Warp<S> {
 
                     let addr = (base.wrapping_add(imm) as usize) & 0xffffffff;
 
+                    #[cfg(debug_assertions)]
                     println!("{:x} : {:x}(x{}) + {:x} = {:x}",
                         pc,
                         base,
@@ -651,9 +663,10 @@ impl<S:SimtxScheduler> Warp<S> {
                             }
                         },
                         0b1101000 => { // FCVT.S.W[U]
+                            let v = core.registers[rs1];
                             match inst.get_rs2() {
-                                0b00000 => core.set_ri(dst, v32_1 as i32),
-                                0b00001 => core.set_ri(dst, (v32_1 as u32) as i32),
+                                0b00000 => core.set_f32_register(dst, v as f32),
+                                0b00001 => core.set_f32_register(dst, (v as u32) as f32),
                                 _ => unreachable!("FCVT"),
                             }
                         },
@@ -703,7 +716,7 @@ impl<S:SimtxScheduler> Warp<S> {
         //
         // If it's not, we just advance the pc
         if update_pc {
-            self.paths[pid].fetch_pc = next_pc
+            self.set_pc(pid, next_pc);
         } else {
             self.update_branch_hist(pc, mask)
         }
@@ -998,7 +1011,9 @@ impl<S:SimtxScheduler> Machine<S> {
     pub fn print_branch_stats(&self) {
         println!("=== BRANCH STATS ===");
         for (pc, stats) in &self.loop_data {
-            println!("{:08x}: {:?}", pc, stats);
+            let ratio = (stats.num_threads_passed as f32)
+                / (stats.times_passed as f32);
+            println!("{:08x}: {:?} (ratio: {})", pc, stats, ratio);
         }
     }
 
@@ -1056,14 +1071,18 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
             let i = Instruction(mem.get_32(pc as usize));
 
             let (advance, i) = if i.is_compressed() {
+                #[cfg(debug_assertions)]
+                print!("{:8x} :: ", i.0 & 0xffff);
                 (2, i.uncompressed())
             } else {
+                #[cfg(debug_assertions)]
+                print!("{:08x} :: ", i.0);
                 (4, i)
             };
 
             // DEBUG
             #[cfg(debug_assertions)]
-            println!("warp {} mask {:x} 0x{:x} :: {}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i);
+            println!("warp {} mask {:x} 0x{:x} :: {} {:x}", wid, self.warps[wid].paths[pathid].execution_mask, pc, i, i.0);
         
             // Update back-branch stats
             if i.get_opcode_enum() == OpCode::BRANCH || (i.get_opcode_enum() == OpCode::JAL && i.get_rd() == 0) {
@@ -1175,11 +1194,11 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("malloc") {
                         for i in self.warps[wid].alive_cores_ids() {
-                            print!("MALLOC CALLED!");
                             let size = self.warps[wid].cores[i].registers[10];
                             let ptr = self.malloc(mem.deref_mut(), size as usize);
                             self.warps[wid].cores[i].set_ri(10, ptr as i32);
-                            println!(" ADRESSE EST {:x}", ptr);
+                            #[cfg(debug_assertions)]
+                            println!("MALLOC CALLED ADRESSE EST {:x}", ptr);
                         }
                         self.warps[wid].advance_pc(pathid, advance);
                     } else if func_name.contains("free") {
@@ -1349,7 +1368,7 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
                                         Err(_) => {},
                                         Ok(size) => { *cur += size as u64 },
                                     }
-                                }).unwrap(),
+                                }).expect("[SIM] Cannot open file"),
                             };
                         }
                         self.warps[wid].advance_pc(pathid, advance);

@@ -281,4 +281,9 @@ fn compressed() {
     assert_eq!(
         Instruction(0x8c32).uncompressed()
         , Instruction::add(24, 12, 0)); // add s8,a2,zero
+    println!("uncompress : {i:016b} ({i:04x})", i = 0x8caa);
+    assert!(Instruction(0x8caa).is_compressed());
+    assert_eq!(
+        Instruction(0x8caa).uncompressed()
+        , Instruction::add(25, 10, 0)); // add s9,a0,zero
 }
