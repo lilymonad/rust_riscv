@@ -11,9 +11,30 @@ use std::{
     ops::DerefMut,
     collections::{HashMap, BTreeMap},
     fs::{File, OpenOptions},
-    io::{Write, Read, BufReader, BufRead},
-    os::unix::fs::FileExt,
+    io::{Write, Read, Seek, SeekFrom},
+    ffi::{CString},
+    marker::PhantomData,
 };
+use libc::{c_char, strtok};
+
+macro_rules! syscall (
+    {$fnv:ident > $func:tt} => {
+        if $fnv.contains(stringify!($func)) {
+            include!(concat!("syscalls/", stringify!($func), ".rs"));
+            break
+        }
+    };
+    {$fnv:ident > ($file:expr) $($func:ident),+} => {
+        if $($fnv.contains(stringify!($func)))||* {
+            include!(concat!("syscalls/", $file));
+            break
+        }
+    };
+);
+
+
+static mut STRTOK_VEC : * mut c_char = 0 as * mut c_char;
+
 
 type BitVec = u32;
 pub const MAX_TPW : usize = core::mem::size_of::<BitVec>() * 8;
@@ -56,7 +77,7 @@ impl MachineF32 {
         ret.bits.hi = 0xFFFFFFFF;
         ret
     }
-    fn from_f64(double:f64) -> Self { Self { double } }
+    //fn from_f64(double:f64) -> Self { Self { double } }
 }
 
 /// Defines the state of a single hardware thread.
@@ -127,14 +148,100 @@ pub enum BranchOutcome<BV:BitSet> {
     Divergent(BV, BV),
 }
 
+impl<BV:BitSet> std::fmt::Display for BranchOutcome<BV> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BranchOutcome::Uniform(taken, mask) => {
+                for b in mask.bits() {
+                    write!(f, "{}", if b { if *taken { 'T' } else { 'N' } } else { ' ' })?;
+                }
+            },
+            BranchOutcome::Divergent(tmask, ntmask) => {
+                for (t, nt) in tmask.bits().zip(ntmask.bits()) {
+                    write!(f, "{}", if t { 'T' } else if nt { 'N' } else { ' ' })?;
+                }
+            },
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PredData {
+    good_uni:usize,
+    good_div:usize,
+    bad_uni:usize,
+    bad_div:usize,
+}
+
+impl PredData {
+    fn new() -> Self { Self { good_uni:0, good_div:0, bad_uni:0, bad_div:0 } }
+    fn update<BV:BitSet>(&mut self, pred_div:bool, actual_div:&BranchOutcome<BV>) {
+        match (pred_div, actual_div) {
+            (false, BranchOutcome::Divergent(..)) => self.bad_div += 1,
+            (true, BranchOutcome::Divergent(..)) => self.good_div += 1,
+            (true, _) => self.bad_uni += 1,
+            (false, _) => self.good_uni += 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CondBranchData {
     times_passed:usize,
     taken_hist:Vec<BranchOutcome<BitVec>>,
+    pred_data:PredData,
 }
 
 impl CondBranchData {
-    fn new() -> Self { Self { times_passed : 0, taken_hist : Vec::new() } }
+    fn new() -> Self { Self { times_passed : 0, taken_hist : Vec::new(), pred_data:PredData::new() } }
+}
+
+#[derive(Debug, Clone)]
+struct DivergencePredictor<T : BitSet> {
+    counter : Vec<i8>,
+    phantom: PhantomData<T>,
+}
+
+impl<BV:BitSet> DivergencePredictor<BV> {
+    fn new() -> Self { Self { counter : vec![1;BV::SIZE as usize], phantom: PhantomData, } }
+
+    fn predict_divergence(&self, mask:BV) -> bool {
+        let nbt = mask.bits().ones().count() - 1;
+        let predictor = &self.counter[nbt];
+        let counter_prediction = *predictor > 1;
+        let uniform_probability = (0.5f32).powi(nbt as i32);
+
+        if uniform_probability == 1.0 {
+            false
+        } else {
+            counter_prediction
+        }
+    }
+
+    fn update(&mut self, outcome:&BranchOutcome<BV>) {
+        match outcome {
+            BranchOutcome::Uniform(_, mask) => {
+                let nbt = mask.bits().ones().count() - 1;
+                let predictor = &mut self.counter[nbt];
+                *predictor = (*predictor - 1).max(0);
+            },
+            BranchOutcome::Divergent(m1, m2) => {
+                let nbt = m1.bits().ones().chain(m2.bits().ones()).count() - 1;
+                let predictor = &mut self.counter[nbt];
+                *predictor = (*predictor + 1).min(3);
+            },
+        }
+    }
+
+    fn predict_and_update(&mut self, mask:BV, outcome:&BranchOutcome<BV>) -> bool {
+        let nbth = mask.bits().ones().count();
+        let ret = self.predict_divergence(mask);
+        if nbth > 1 {
+            self.update(outcome);
+        }
+        ret
+    }
 }
 
 /// Defines a hardware warp (a group of threads) which all execute instructions
@@ -155,13 +262,20 @@ pub struct Warp<S:SimtxScheduler> {
     // Scheduler black box 
     pub scheduler:S,
     pub schedule_invalidated:bool,
+
+    // divergence prediction
+    div_pred:Vec<DivergencePredictor<u32>>,
 }
 
 impl<S:SimtxScheduler> Warp<S> {
     pub fn new(tpw:usize) -> Warp<S> {
         let mut cores = Vec::new();
         cores.resize(tpw, Core { registers : [ 0; 32 ], fregisters: [ MachineF32::new(); 32 ] });
+
+        let div_pred = vec![DivergencePredictor::new(); 1<<16];
+
         Warp {
+            div_pred,
             schedule_invalidated:true,
             cores,
             paths: Vec::new(),
@@ -252,7 +366,7 @@ impl<S:SimtxScheduler> Warp<S> {
         self.paths[self.current_path.unwrap()].execution_mask.bits().ones().map(|id| id as usize)
     }
 
-    fn update_branch_hist(&mut self, pc:i32, mask:BitVec) {
+    pub fn update_branch_hist(&mut self, pc:i32, mask:BitVec) {
         if let Some(hist) = self.branch_mask_hist.get_mut(&pc) {
             hist.push(mask);
         } else {
@@ -337,6 +451,9 @@ impl<S:SimtxScheduler> Warp<S> {
                 let  tpc = pc.wrapping_add(inst.get_imm_b());
                 let ntpc = pc.wrapping_add(advance);
 
+
+                let pred_id = (pc & 0xffff) ^ ((pc >> 16) & 0xffff);
+
                 let mut taken_mask = 0;
 
                 // compute taken/not_taken masks for each alive thread
@@ -372,6 +489,7 @@ impl<S:SimtxScheduler> Warp<S> {
                 } else if !taken_mask.any() { // uniform not taken
                     self.set_pc(pid, ntpc);
                 } else {                      // divergent
+
                     self.remove_path(self.current_path.unwrap());
                     self.push_path(Path::from_pc_mask(tpc, taken_mask));
                     self.push_path(Path::from_pc_mask(ntpc, not_taken_mask));
@@ -386,8 +504,11 @@ impl<S:SimtxScheduler> Warp<S> {
                             BranchOutcome::Divergent(taken_mask, not_taken_mask)
                         };
 
+                let prediction = self.div_pred[pred_id as usize].predict_and_update(mask, &outcome);
+
                 let dat = self.cond_branch_data.entry(pc).or_insert(CondBranchData::new());
                 dat.times_passed += 1;
+                dat.pred_data.update(prediction, &outcome);
                 dat.taken_hist.push(outcome);
 
                 update_pc = false
@@ -401,11 +522,13 @@ impl<S:SimtxScheduler> Warp<S> {
 
                     let addr = (base.wrapping_add(imm) as usize) & 0xffffffff;
 
-                    let value = match width {
+                    #[cfg(debug_assertion)]
+                    println!("loading at address {:x}+{} = {:x}", base, imm, addr);
+                    let value = match width & 0b11 {
                             0 => mem.get_8(addr) as i32,
                             1 => mem.get_16(addr) as i32,
                             2 => mem.get_32(addr) as i32,
-                            _ => panic!("LOAD: bad word width"), // ERROR
+                            _ => panic!("LOAD: bad word width {}", width), // ERROR
                         };
 
                     #[cfg(debug_assertions)]
@@ -857,7 +980,7 @@ pub struct Machine<S:SimtxScheduler> {
     stack_size: usize,
 
     // For files and IO purposes
-    file_handles: BTreeMap<i32, (File, u64)>,
+    file_handles: BTreeMap<i32, File>,
     next_fid: i32,
 }
 
@@ -922,6 +1045,7 @@ impl<S:SimtxScheduler> Machine<S> {
         let ret = self.heap_ptr;
         self.heap_ptr += size;
 
+        println!("mallo {} returns 0x{:08x}", size, ret);
         ret
     }
 
@@ -997,14 +1121,16 @@ impl<S:SimtxScheduler> Machine<S> {
 //        }
         println!("detected loops:");
         for (end, start) in &self.detected_loops {
-            println!("{:08x} -> {:08x}", start, end)
+            println!("{:08x} -> {:08x}", start, end);
+
         }
     }
 
     pub fn print_relevant_pcs(&self) {
         println!("=== DETECTED LOOPS ===");
         for (end, start) in &self.detected_loops {
-            println!("{:08x} -> {:08x}", start, end)
+            println!("{:08x} -> {:08x}", start, end);
+
         }
     }
 
@@ -1014,6 +1140,27 @@ impl<S:SimtxScheduler> Machine<S> {
             let ratio = (stats.num_threads_passed as f32)
                 / (stats.times_passed as f32);
             println!("{:08x}: {:?} (ratio: {})", pc, stats, ratio);
+        }
+
+        println!("=== PREDICTOR STATS ===");
+        for w in &self.warps {
+            for (pc, dat) in &w.cond_branch_data {
+                println!("Branch {:08x} : {:?}", pc, dat.pred_data);
+            }
+        }
+    }
+
+    pub fn print_branch_hist(&self, branch:i32) {
+        for w in &self.warps {
+            for (pc, dat) in &w.cond_branch_data {
+                if *pc == branch {
+                    println!("\\begin{{hist}}");
+                    for entry in &dat.taken_hist {
+                        println!("{}", entry);
+                    }
+                    println!("\\end{{hist}}");
+                }
+            }
         }
     }
 
@@ -1099,284 +1246,31 @@ impl<S:SimtxScheduler> MultiCoreIMachine for Machine<S> {
 
             if i.get_opcode_enum() == OpCode::JAL {
                 let address = pc.wrapping_add(i.get_imm_j());
-                if let Some(func_name) = self.plt_addresses.get(&address) {
-                    if func_name.contains("pthread_create") {
-
-                        assert!(self.warps[wid].paths[pathid].is_single(),
-                            "pthread_create must be called by only 1 thread");
-
-                        // allocate a new thread (get its id)
-                        let tid = self.pop_first_idle();
-                        let w = tid / tpw; let t = tid % tpw;
-
-                        let stacksize = self.stack_size;
-                        let stackstart = self.stack_start - stacksize * tid; 
-                        let stackend = stackstart - stacksize;
-                        mem.allocate_at(stackend, stacksize);
-
-                        let cid = self.warps[wid].get_single_core_id();
-                        // write in memory the tid
-                        let addr = self.warps[wid].cores[cid].registers[10] as usize;
-                        mem.set_32(addr, tid as u32);
-
-                        // setup allocated core's register file
-                        let mut regs = [0;32];
-                        regs[2] = stackstart as i32;
-                        regs[8] = stackstart as i32;
-                        regs[3] = self.warps[wid].cores[cid].registers[3];
-                        regs[4] = tid as i32;
-                        regs[10] = self.warps[wid].cores[cid].registers[13];
-                        self.warps[w].cores[t].registers = regs;
-
-                        // setup a new path with only allocated thread inside
-                        let npc = self.warps[wid].cores[cid].registers[12];
-                        let m = BitSet::singleton(t);
-
-                        self.warps[w].push_path(Path::from_pc_mask(npc, m));
-
-                        // return 0 and advance current path
-                        self.warps[wid].cores[cid].set_ri(10, 0);
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("pthread_join") {
-                        let cid = self.warps[wid].get_single_core_id();
-                        let to_wait = self.warps[wid].cores[cid].registers[10] as usize;
-                        if self.idle_threads.contains(&to_wait) {
-                            self.warps[wid].advance_pc(pathid, advance);
-                        }
-                    } else if func_name.contains("pthread_barrier_init") {
-                        let cid = self.warps[wid].get_single_core_id();
-                        let num = self.warps[wid].cores[cid].registers[12];
-                        let ptr = self.warps[wid].cores[cid].registers[10];
-
-                        self.barriers.insert(ptr, Barrier {
-                            initial_cap:num,
-                            current_cap:num,
-                        });
+                if let Some(func_name) = self.plt_addresses.get(&address).cloned() {
+                    loop {
+                        syscall!{func_name > pthread_create}
+                        syscall!{func_name > pthread_join}
+                        syscall!{func_name > pthread_barrier_init}
+                        syscall!{func_name > pthread_barrier_wait}
+                        syscall!{func_name > ("puts.rs") puts, printf}
+                        syscall!{func_name > malloc}
+                        syscall!{func_name > free}
+                        syscall!{func_name > GOMP_parallel}
+                        syscall!{func_name > omp_get_num_threads}
+                        syscall!{func_name > omp_get_thread_num}
+                        syscall!{func_name > exit}
+                        syscall!{func_name > strtof}
+                        syscall!{func_name > strtol}
+                        syscall!{func_name > ("open.rs") fopen, open}
+                        syscall!{func_name > read}
+                        syscall!{func_name > strtok}
+                        syscall!{func_name > rewind}
+                        syscall!{func_name > fgets}
+                        syscall!{func_name > fwrite}
+                        syscall!{func_name > printf}
 
                         self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("pthread_barrier_wait") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let core = &self.warps[wid].cores[i];
-                            let tid = wid*tpw + i;
-                            let ptr = core.registers[10];
-
-                            // don't re-execute the wait
-                            if self.in_barrier[tid] == ptr { continue }
-
-                            // if the barrier exists
-                            if let Some(barr) = self.barriers.get_mut(&ptr) {
-
-                                // put thread in barrier
-                                self.in_barrier[tid] = ptr;
-                                // decrement its capacity
-                                barr.current_cap -= 1;
-
-                                // it the barrier must open, free all threads
-                                // then stop the loop
-                                if barr.current_cap == 0 {
-                                    barr.current_cap = barr.initial_cap;
-                                    self.free_barrier(ptr, advance);
-                                    break;
-                                }
-                            }
-                        }
-                    } else if func_name.contains("puts") || func_name.contains("printf") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let mut str_addr = self.warps[wid].cores[i].registers[10] as usize;
-                            let mut byte = mem.get_8(str_addr); let mut s = String::new();
-                            while byte != 0 {
-                                s.push(byte as char);
-                                str_addr += 1;
-                                byte = mem.get_8(str_addr);
-                            }
-                            println!("{}", s);
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("malloc") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let size = self.warps[wid].cores[i].registers[10];
-                            let ptr = self.malloc(mem.deref_mut(), size as usize);
-                            self.warps[wid].cores[i].set_ri(10, ptr as i32);
-                            #[cfg(debug_assertions)]
-                            println!("MALLOC CALLED ADRESSE EST {:x}", ptr);
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("free") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let ptr = self.warps[wid].cores[i].registers[10];
-                            self.free(ptr as usize);
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("GOMP_parallel") {
-                        let ids : Vec<usize> = self.warps[wid].alive_cores_ids().collect();
-                        if ids.len() != 1 { panic!("GOMP_parallel() called by more than one thread") }
-
-                        let id = ids[0];
-                        let core = &self.warps[wid].cores[id];
-                        let _function = core.registers[10];
-                    } else if func_name.contains("omp_get_num_threads") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let num_warps = self.warps.len();
-                            let core = &mut self.warps[wid].cores[i];
-                            core.set_ri(10, (num_warps * tpw) as i32);
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("omp_get_thread_num") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let core = &mut self.warps[wid].cores[i];
-                            let tid = wid*tpw + i;
-                            //println!("core {} omp_get_thread_num = {}", wid, tid);
-                            core.set_ri(10, tid as i32);
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("exit") {
-                        self.warps[wid].set_pc(pathid, 0);
-                    } else if func_name.contains("strtof") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let core = &mut self.warps[wid].cores[i];
-                            let mut str_addr = core.registers[10];
-                            let mut to_parse = String::new();
-                            let mut byte = mem.get_8(str_addr as usize);
-
-                            //println!("byte at 0x{:x}", str_addr);
-
-                            while byte != 0 && byte != ('\n' as u8) {
-                                to_parse.push(byte as char);
-                                str_addr += 1;
-                                byte = mem.get_8(str_addr as usize);
-                            }
-        
-                            //println!("strtof({})", to_parse);
-                            let parsed = to_parse.parse()
-                                .expect(format!("couldnt parse {} to float", to_parse).as_str());
-                            //println!("strtol(\"{}\") = {}", to_parse, parsed);
-
-                            let x : MachineF32 = MachineF32::from_f32(parsed);
-                            unsafe { core.set_ri(10, x.bits.lo as i32); }
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("strtol") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let core = &mut self.warps[wid].cores[i];
-                            let mut str_addr = core.registers[10];
-                            let mut to_parse = String::new();
-                            let mut byte = mem.get_8(str_addr as usize);
-
-                            //println!("byte at 0x{:x}", str_addr);
-
-                            while byte != 0 {
-                                to_parse.push(byte as char);
-                                str_addr += 1;
-                                byte = mem.get_8(str_addr as usize);
-                            }
-        
-                            let parsed = to_parse.parse()
-                                .expect(format!("couldnt parse {} to int", to_parse).as_str());
-                            //println!("strtol(\"{}\") = {}", to_parse, parsed);
-
-                            core.set_ri(10, parsed);
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("fopen") {
-                        let cid = self.warps[wid].get_single_core_id();
-                        let core = &mut self.warps[wid].cores[wid];
-                        let mut addr = core.registers[10] as usize;
-                        let mut c = mem.get_8(addr);
-                        let mut fname = String::new();
-                        while c != 0 {
-                            fname.push(c as char);
-                            addr += 1;
-                            c = mem.get_8(addr);
-                        }
-                        let mut oo = OpenOptions::new();
-                        oo
-                            .write(true)
-                            .read(true)
-                            .create(true);
-
-                        core.set_ri(10, match oo.open(&fname) {
-                            Err(_) => 0,
-                            Ok(f) => {
-                                self.file_handles.insert(self.next_fid
-                                    , (f, 0));
-                                let ret = self.next_fid;
-                                self.next_fid += 1;
-                                ret
-                            },
-                        });
-
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("fgets") {
-                        let cid = self.warps[wid].get_single_core_id();
-                        let core = &mut self.warps[wid].cores[wid];
-                        let mut addr = core.registers[10] as usize;
-                        let size = core.registers[11] as u64;
-                        let fp = core.registers[12];
-
-                        match fp {
-                            0 | 2 => panic!("reading from stdout or stderr"),
-                            1 => {
-                                let mut buf = String::new();
-                                std::io::stdin().read_line(&mut buf).unwrap();
-                                for byte in buf.bytes() {
-                                    mem.set_8(addr, byte);
-                                    addr += 1;
-                                }
-                                mem.set_8(addr, 0);
-                            },
-                            n => {
-                                self.file_handles.get_mut(&n).map(|(file, cur)| {
-                                    let mut vec = vec![0;128];
-                                    if let Ok(size) = file.read_at(&mut vec, *cur) {
-                                        let line =
-                                        vec.iter().take_while(|c| {
-                                            **c != ('\n' as u8)
-                                        });
-
-                                        let mut i = 0;
-                                        for b in line {
-                                            mem.set_8(addr + i, *b);
-                                            i += 1;
-                                        }
-                                        mem.set_8(addr + i, 0);
-
-                                        *cur += (i+1) as u64;
-                                    }
-                                });
-                            },
-                        }
-
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("fwrite") {
-                        for i in self.warps[wid].alive_cores_ids() {
-                            let core = &mut self.warps[wid].cores[i];
-                            let file_desc = core.registers[13];
-                            let mut str_addr = core.registers[10];
-                            let mut to_write = String::new();
-                            let mut byte = mem.get_8(str_addr as usize);
-                            while byte != 0 {
-                                to_write.push(byte as char);
-                                str_addr += 1;
-                                byte = mem.get_8(str_addr as usize);
-                            }
-                            match file_desc {
-                                0 => print!("{}", to_write),
-                                1 => panic!("writing to stdin"),
-                                2 => eprint!("{}", to_write),
-                                n => self.file_handles.get_mut(&n).map(|(f,cur)| {
-                                    match f.write_at(to_write.as_bytes(), *cur) {
-                                        Err(_) => {},
-                                        Ok(size) => { *cur += size as u64 },
-                                    }
-                                }).expect("[SIM] Cannot open file"),
-                            };
-                        }
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else if func_name.contains("printf") {
-                        println!("<printf>");
-                        self.warps[wid].advance_pc(pathid, advance);
-                    } else {
-                        self.warps[wid].advance_pc(pathid, advance);
+                        break
                     }
                 } else {
                     self.warps[wid].execute(mem.deref_mut())

@@ -4,6 +4,7 @@
 //! anything you want on top of this base. This crate was created only with the
 //! [RISC-V ISA specification](https://riscv.org/specifications/).
 
+extern crate libc;
 extern crate elf as elflib;
 extern crate crossbeam;
 

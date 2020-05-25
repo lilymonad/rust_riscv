@@ -17,6 +17,7 @@ debug=false
 elf = "^0.0.10" # .elf files parsing
 crossbeam = "*" # parallelism
 clap = "*"      # command line arguments
+libc = "*"
 
 [[bin]]
 name = "simtx"

@@ -144,7 +144,7 @@ fn main() {
     }
 
     for pc in monitored_pc {
-        machine.print_stats_for_pc(usize::from_str_radix(pc.into(), 16).unwrap());
+        machine.print_branch_hist(i32::from_str_radix(pc.into(), 16).unwrap());
     }
 
     machine.print_relevant_pcs();

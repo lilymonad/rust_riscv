@@ -1,0 +1,6 @@
+bfs ./simtx -s timeshare -- -- 32 1 resources/bfs 32 resources/data/bfs/graph1MW_6.txt
+heartwall ./simtx -s timeshare -- -- 32 1 resources/heartwall resources/data/heartwall/test.avi 20 32
+backprop ./simtx -s timeshare -- -- 32 1 resources/backprop 1
+pathfinder ./simtx -s timeshare -- -m 1084a -- 32 1 resources/pathfinder_barrier 1024 128
+srad ./simtx -s timeshare -- -- 32 1 resources/srad 1024 1024 32 64 32 64 32 1 10
+kmeans
